@@ -118,6 +118,15 @@ The YAML configuration should contain at least:
 - random seed options
 - logic expressions to evaluate
 
+# GUI / Visualization
+I want a GUI that shows me the detectors:
+- I can interact with the GUI, rotating the system (3D view).
+- Detector color can be chosen (default is grey).
+- Background color can be chosen (default is black).
+- Optional event display, event by event: a track passing through a detector has 2 modes:
+  - turn it green if the track passes and the detector is efficient (fires)
+  - turn it red if the track passes and the detector is not efficient (does not fire)
+
 # Explicit exclusions
 Do not implement:
 - energy loss
