@@ -74,7 +74,7 @@ Later runs reuse the same environment unless `requirements.txt` changes.
 <details>
 <summary><strong>Expected headless output</strong></summary>
 
-```bash
+```text
 $ ./run_toymc.sh configs/example.yaml
 Progress: 2000000 / 2000000 (100.00%)
 Seed: 123456
