@@ -22,11 +22,7 @@
 > It does not simulate energy loss, material interactions, multiple scattering, timing, or secondaries.
 
 > [!NOTE]
-> This repo is meant to be run locally from the checkout with `./run_toymc.sh`.
-> The launcher creates `.venv/`, installs dependencies from `requirements.txt`,
-> and starts the CLI from this repository.
-
-> [!NOTE] AI disclaimer
+> **AI disclaimer**
 > This is a personal project I built mainly to learn how to code with AI assistance.
 > I used AI heavily throughout the development process, especially because I had no prior Python experience.
 > For me, AI was a tool that made this project possible.
