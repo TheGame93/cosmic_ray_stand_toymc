@@ -1,4 +1,4 @@
-# toyMC_cosmic
+# Toy MC Cosmic Ray Stand: Acceptance, Rates and Efficiencies
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python 3.12">
@@ -11,10 +11,15 @@
   <tr>
     <td>
       <strong>Toy Monte Carlo for cosmic-ray stands</strong><br>
-      Simulate geometric acceptance, detector response, logic rates, and conditional probabilities from a YAML configuration.
+      A geometric Monte Carlo for estimating cosmic ray stand acceptance, trigger rates, and detector efficiencies.
     </td>
   </tr>
 </table>
+
+
+> [!IMPORTANT]
+> The current engine is intentionally geometric and simple.
+> It does not simulate energy loss, material interactions, multiple scattering, timing, or secondaries.
 
 > [!NOTE]
 > This repo is meant to be run locally from the checkout with `./run_toymc.sh`.
@@ -361,18 +366,5 @@ python3 scripts/run_toymc.py configs/example.yaml
 ```bash
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 ```
-
-</details>
-
-## Notes
-
-<details>
-<summary><strong>Project notes</strong></summary>
-
-- The current engine is intentionally geometric and simple.
-- It does not simulate energy loss, material interactions, multiple scattering,
-  timing, or secondaries.
-- The GUI is optional and uses `PyVista` through lazy imports.
-- Headless CLI usage still works without importing GUI modules at runtime.
 
 </details>
