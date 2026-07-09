@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import io
 import unittest
+from unittest import mock
 
 from toymc_cosmic.cli import (
     _format_detector_rate_table,
     _format_probability,
     _format_rate_hz,
     _render_progress,
+    _validate_gui_arguments,
+    build_parser,
+    main,
 )
 from toymc_cosmic.geometry import Detector
 from toymc_cosmic.rates import ProbabilityEstimate, RateEstimate
@@ -92,3 +96,60 @@ class CliTests(unittest.TestCase):
         )
         self.assertIn("1.123 +/- 0.004 Hz", table)
         self.assertIn("0.988 +/- 0.003 Hz", table)
+
+    def test_gui_mode_requires_one_gui_submode(self) -> None:
+        """The CLI should reject bare `--gui` without a mode."""
+        parser = build_parser()
+        args = parser.parse_args(["config.yaml", "--gui"])
+        with self.assertRaises(SystemExit):
+            _validate_gui_arguments(parser, args)
+
+    def test_gui_submode_requires_gui_flag(self) -> None:
+        """The CLI should reject GUI submodes unless `--gui` is present."""
+        parser = build_parser()
+        args = parser.parse_args(["config.yaml", "--event-display"])
+        with self.assertRaises(SystemExit):
+            _validate_gui_arguments(parser, args)
+
+    @mock.patch("toymc_cosmic.cli.run_simulation")
+    @mock.patch("toymc_cosmic.cli.show_geometry_only")
+    @mock.patch("toymc_cosmic.cli.load_config")
+    def test_geometry_only_mode_skips_simulation(
+        self,
+        load_config_mock: mock.Mock,
+        show_geometry_only_mock: mock.Mock,
+        run_simulation_mock: mock.Mock,
+    ) -> None:
+        """Geometry-only GUI mode should not run the Monte Carlo."""
+        config = object()
+        load_config_mock.return_value = config
+
+        exit_code = main(["config.yaml", "--gui", "--geometry-only"])
+
+        self.assertEqual(exit_code, 0)
+        show_geometry_only_mock.assert_called_once_with(config)
+        run_simulation_mock.assert_not_called()
+
+    @mock.patch("toymc_cosmic.cli._print_headless_summary")
+    @mock.patch("toymc_cosmic.cli.show_event_display")
+    @mock.patch("toymc_cosmic.cli.run_simulation")
+    @mock.patch("toymc_cosmic.cli.load_config")
+    def test_event_display_mode_runs_simulation_then_opens_gui(
+        self,
+        load_config_mock: mock.Mock,
+        run_simulation_mock: mock.Mock,
+        show_event_display_mock: mock.Mock,
+        print_summary_mock: mock.Mock,
+    ) -> None:
+        """Event-display GUI mode should simulate first, then open the viewer."""
+        config = object()
+        simulation_result = object()
+        load_config_mock.return_value = config
+        run_simulation_mock.return_value = simulation_result
+
+        exit_code = main(["config.yaml", "--gui", "--event-display"])
+
+        self.assertEqual(exit_code, 0)
+        run_simulation_mock.assert_called_once()
+        print_summary_mock.assert_called_once_with(config, simulation_result)
+        show_event_display_mock.assert_called_once_with(config, simulation_result)

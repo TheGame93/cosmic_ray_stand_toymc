@@ -11,8 +11,10 @@ probabilities to the terminal.
 ## Requirements
 
 - Python 3.12
-- `numpy`
-- `PyYAML`
+- a local `venv` created inside the repository folder
+
+The launcher script installs the Python dependencies automatically into
+`.venv/` using [requirements.txt](/home/matteo/programmi/toyMC_cosmic/requirements.txt).
 
 ## Configuration
 
@@ -77,8 +79,8 @@ output:
   detector-rate table
 - `output.logic_rate_decimals`: digits after the decimal point for logic
   expression rates
-- `gui`: optional section preserved for the future GUI layer. It is ignored by
-  the headless engine.
+- `gui`: optional section used by the GUI layer and ignored by the headless
+  engine.
 
 ### Detector fields
 
@@ -160,28 +162,68 @@ The engine automatically reports both:
 
 `numerator` and `given` use the same expression syntax as `logic.expressions`.
 
+### GUI configuration
+
+The optional `gui:` section controls colors and line width for visualization.
+
+Supported fields:
+
+- `background_color`
+- `default_detector_color`
+- `detector_colors`
+- `default_track_color`
+- `track_color_geometric_only`
+- `track_color_fired_given_only`
+- `track_color_fired_joint`
+- `line_width`
+
+Color values can be written as:
+
+- named colors such as `black`, `lightgray`, `orange`, `lime`
+- hex strings such as `"#ff8800"`
+- RGB triples such as `[0.2, 0.6, 1.0]`
+
 ## Running the engine
 
-There are two equivalent ways to run the engine.
+The main entry point is the root launcher script:
 
-If you are working directly from this repository without installing the package,
-use the wrapper script:
+```bash
+./run_toymc.sh configs/example.yaml
+```
+
+On the first run, `run_toymc.sh` will:
+
+- create `.venv/` in the repository root if it does not exist
+- install the dependencies from `requirements.txt`
+- launch the local CLI from this checkout
+
+Later runs reuse the same virtual environment unless `requirements.txt`
+changes.
+
+If you want to inspect or use the environment manually:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+For local development, the Python wrapper script still exists:
 
 ```bash
 python3 scripts/run_toymc.py configs/example.yaml
 ```
 
-If you installed the package, use the console command defined in
-`pyproject.toml`:
+That wrapper is mainly useful if you already manage the Python environment
+yourself.
+
+### Headless mode
+
+Run the standard terminal-only simulation:
 
 ```bash
-toymc-cosmic configs/example.yaml
+./run_toymc.sh configs/example.yaml
 ```
-
-The `toymc-cosmic` command is the installed CLI entry point. It runs the
-`main()` function in `src/toymc_cosmic/cli.py`. The `scripts/run_toymc.py`
-wrapper exists so the same CLI can be used directly from the repository
-without installation.
 
 The output prints:
 
@@ -192,12 +234,40 @@ The output prints:
 - logic-expression rates
 - conditional probabilities
 
+### Geometry-only GUI
+
+Open a rotatable detector-only 3D scene without running the Monte Carlo:
+
+```bash
+./run_toymc.sh configs/example.yaml --gui --geometry-only
+```
+
+### Event-display GUI
+
+Run the simulation once, then step through events in the GUI:
+
+```bash
+./run_toymc.sh configs/example.yaml --gui --event-display
+```
+
+Current event-display behavior:
+
+- left/right arrow keys step backward or forward
+- `q` or `Escape` closes the viewer
+- detector colors show:
+  - green when crossed and fired
+  - red when crossed and not fired
+  - base color otherwise
+- the track color depends on the currently shown conditional state
+- if multiple conditionals are geometrically relevant for one event, the GUI
+  cycles through them before advancing to the next event
+
 ## Running the tests
 
 The current test suite uses the standard library `unittest` runner:
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests -v
+PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 ```
 
 ## Notes
@@ -205,4 +275,5 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 - The current engine is intentionally geometric and simple.
 - It does not simulate energy loss, material interactions, multiple scattering,
   timing, or secondaries.
-- The GUI is planned separately and is not part of the current runtime.
+- The GUI is optional and uses `PyVista` through lazy imports.
+- Headless CLI usage still works without importing GUI modules at runtime.

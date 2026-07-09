@@ -44,4 +44,17 @@ output:
   logic_rate_decimals: 3
 
 gui:
+  # Accepted color examples:
+  # - named colors such as black, lightgray, orange, lime
+  # - hex strings such as "#ff8800"
+  # - RGB triples such as [0.2, 0.6, 1.0]
   background_color: black
+  default_detector_color: lightgray
+  detector_colors:
+    T1: steelblue
+    D1: tomato
+  default_track_color: white
+  track_color_geometric_only: orange
+  track_color_fired_given_only: gold
+  track_color_fired_joint: lime
+  line_width: 4.0

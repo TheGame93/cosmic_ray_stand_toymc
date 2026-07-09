@@ -9,6 +9,7 @@ from typing import TextIO
 from typing import Sequence
 
 from .config import load_config
+from .gui import show_event_display, show_geometry_only
 from .rates import conditional_probability, detector_rates, logic_rates
 from .simulation import run_simulation
 
@@ -17,17 +18,57 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(description="Run the toy cosmic-ray Monte Carlo engine.")
     parser.add_argument("config", help="Path to the YAML configuration file.")
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Enable GUI mode.",
+    )
+    gui_mode_group = parser.add_mutually_exclusive_group()
+    gui_mode_group.add_argument(
+        "--geometry-only",
+        action="store_true",
+        help="Show detector geometry only without running the Monte Carlo.",
+    )
+    gui_mode_group.add_argument(
+        "--event-display",
+        action="store_true",
+        help="Run the Monte Carlo and open the step-by-step event display.",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the headless CLI and print the requested observables."""
+    """Run the CLI either in headless or GUI mode."""
     parser = build_parser()
     args = parser.parse_args(argv)
+    _validate_gui_arguments(parser, args)
 
     config = load_config(args.config)
-    simulation_result = run_simulation(config, progress_callback=_render_progress)
 
+    if args.gui and args.geometry_only:
+        show_geometry_only(config)
+        return 0
+
+    simulation_result = run_simulation(config, progress_callback=_render_progress)
+    _print_headless_summary(config, simulation_result)
+
+    if args.gui and args.event_display:
+        show_event_display(config, simulation_result)
+
+    return 0
+
+
+def _validate_gui_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Reject incompatible GUI argument combinations."""
+    gui_mode_requested = args.geometry_only or args.event_display
+    if gui_mode_requested and not args.gui:
+        parser.error("--geometry-only and --event-display require --gui.")
+    if args.gui and not gui_mode_requested:
+        parser.error("--gui requires either --geometry-only or --event-display.")
+
+
+def _print_headless_summary(config, simulation_result) -> None:
+    """Print the standard terminal summary for one simulation result."""
     print(f"Seed: {simulation_result.seed}")
     print(
         "Generated events: "
@@ -77,8 +118,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"  {conditional.name}")
             print(f"    fired:     {_format_probability(fired_estimate)}")
             print(f"    geometric: {_format_probability(geometric_estimate)}")
-
-    return 0
 
 
 def _format_detector_rate_table(
