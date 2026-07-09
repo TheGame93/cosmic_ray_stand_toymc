@@ -1,0 +1,37 @@
+seed: 123456
+theta_max_deg: 80.0
+
+angular_model:
+  type: cos2
+
+flux_hz_per_cm2: 1
+
+monte_carlo:
+  n_events: 20000000
+
+detectors:
+  - name: T1
+    center: [0.0, 0.0, 100.0]
+    size: [10.0, 10.0, 1.0]
+    efficiency: 1
+  - name: T2
+    center: [0.0, 0.0, 50.0]
+    size: [10.0, 10.0, 1.0]
+    efficiency: 1
+  - name: D1
+    center: [0.0, 0.0, 0.0]
+    size: [10.0, 10.0, 1.0]
+    efficiency: 1
+
+logic:
+  expressions:
+    - "T1 and T2 and D1"
+    - "T1 and T2 and not D1"
+  conditional:
+    - name: "P(D1 fires | T1 and T2 fire)"
+      numerator: "D1"
+      given: "T1 and T2"
+      mode: fired
+
+gui:
+  background_color: black
