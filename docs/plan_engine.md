@@ -14,6 +14,27 @@ Locked architectural rule:
 - The future GUI must consume engine APIs and engine results only.
 - Engine code must not contain visualization-specific behavior.
 
+## Implementation style
+
+This phase must optimize for readability and teaching value because the code is
+intended to be understood by a non-expert Python reader.
+
+- Prefer readability and explicitness over compact, clever, or heavily
+  abstract Python.
+- Prefer simple control flow over dense one-liners.
+- Prefer explicit variable names over terse names.
+- Prefer small understandable steps over clever vectorized or abstract
+  constructions when both are viable.
+- Prefer straightforward module boundaries over framework-heavy patterns.
+- Every function, including internal helpers, must have a docstring describing
+  purpose, inputs, outputs, and important assumptions.
+- Every class must have a docstring describing its responsibility and the
+  meaning of its main fields.
+- Inline comments are required generously in non-obvious code paths. Comments
+  must explain why a step exists and what is being computed, not trivial syntax.
+- Short examples in docstrings or comments are encouraged when they remove
+  ambiguity for a beginner reader.
+
 ## Package layout
 
 ```text
@@ -143,6 +164,10 @@ Crossing is determined with a vectorized slab-based ray/AABB intersection:
 - the strict inequality is required so a surface-only, edge-only, or
   corner-only touch does not count as a crossing
 
+This is a numerically dense part of the codebase and must be written in a very
+explicit style, with inline comments describing the role of each intermediate
+quantity and why the strict crossing condition is needed.
+
 Use the highest detector top face as the reference `z` plane for track origins.
 
 ### Generation region
@@ -188,6 +213,11 @@ with `p = N_O / N_gen`.
 Conditional probabilities are dimensionless and use the standard binomial
 uncertainty on `N_joint / N_cond`.
 
+Angular sampling, flux normalization, and uncertainty formulas must be
+implemented in small readable steps with explanatory comments and docstrings.
+Avoid compressing these calculations into hard-to-read expressions if a clearer
+version is practical.
+
 ### Detector response
 
 After a geometric crossing, each detector fires independently with a Bernoulli
@@ -228,6 +258,10 @@ separate in both the data model and the reported results.
 - allow only detector names plus boolean `and`, `or`, `not`
 - reject calls, arithmetic, comparisons, or other Python syntax
 
+The AST traversal and validation logic must be heavily commented because this
+is another area that may be non-obvious to a reader without strong Python
+experience.
+
 ### `rates.py`
 
 - rate estimate container
@@ -249,6 +283,9 @@ separate in both the data model and the reported results.
 The engine may either ignore `gui:` content after parsing or preserve it as
 opaque config data, but the engine must not depend on it for validation of
 physics behavior or for normal execution.
+
+Config validation code should favor clear branching and readable error messages
+over compact validation patterns.
 
 ### `simulation.py`
 
@@ -325,7 +362,10 @@ In this phase:
    uncertainty formulas.
 9. Implement `simulation.py` and integration tests over a small detector setup.
 10. Implement the terminal CLI and a manual smoke run using `configs/example.yaml`.
-11. Run the full engine test suite and confirm the project is fully usable
+11. Perform a readability review pass: add or refine docstrings, explanatory
+    inline comments, and any overly compressed code paths before considering the
+    engine phase complete.
+12. Run the full engine test suite and confirm the project is fully usable
     without any GUI package installed.
 
 ## Test plan
@@ -348,6 +388,11 @@ Required tests:
   - `fired <= crossed` for every detector
   - `rate(A and B) <= rate(A)`
   - probabilities stay in `[0, 1]` when conditioning is defined
+- implementation review checks:
+  - every function and class has a docstring
+  - non-obvious code paths contain explanatory inline comments
+  - unnecessarily clever or compressed constructs are rewritten when a clearer
+    version is practical
 
 Manual verification:
 
@@ -360,6 +405,8 @@ Completion criterion for this plan:
 - the package, tests, and CLI all work in a headless environment
 - no GUI dependency is needed
 - the resulting `SimulationResult` is rich enough for the later GUI plan
+- the code is readable by a non-expert Python reader, with docstrings and
+  comments present across the non-obvious parts of the implementation
 
 ## Assumptions and defaults
 

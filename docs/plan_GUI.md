@@ -14,6 +14,26 @@ Locked architectural rule:
 - Engine code does not depend on GUI code.
 - Headless CLI usage must continue to work when GUI dependencies are absent.
 
+## Implementation style
+
+This phase must follow the same readability-first rule as the engine plan.
+The GUI code should be understandable to a non-expert Python reader.
+
+- Prefer readability and explicitness over compact, clever, or heavily
+  abstract Python.
+- Prefer simple control flow over dense one-liners.
+- Prefer explicit variable names over terse names.
+- Prefer small understandable steps over compressed callback or actor-update
+  logic when both are viable.
+- Every function, including internal helpers, must have a docstring describing
+  purpose, inputs, outputs, and important assumptions.
+- Every class must have a docstring describing its responsibility and the
+  meaning of its main fields.
+- Inline comments are required generously in non-obvious code paths. Comments
+  must explain why a step exists and what is being computed, not trivial syntax.
+- Short examples in docstrings or comments are encouraged when they remove
+  ambiguity for a beginner reader.
+
 ## Dependency and packaging model
 
 The GUI lives in separate modules, for example:
@@ -77,6 +97,9 @@ Provide a 3D detector view with:
 `scene.py` should build the static PyVista plotter and detector meshes from the
 engine data model only.
 
+Scene construction should be written in a step-by-step style with comments
+explaining how engine geometry maps to displayed meshes and colors.
+
 ### Event display
 
 Provide an event-by-event viewer with:
@@ -93,6 +116,10 @@ Provide an event-by-event viewer with:
 The event display must read directly from the engine `SimulationResult`
 booleans and track arrays. It must not infer event state by recomputing
 geometry.
+
+Event navigation callbacks, actor replacement logic, and the mapping from
+engine booleans to detector colors must be explicitly written and commented,
+since these are the parts most likely to be opaque to a non-expert reader.
 
 ## Integration shape
 
@@ -127,6 +154,9 @@ Whichever path is chosen, these rules are mandatory:
 
 No engine physics logic belongs in either module.
 
+Lazy imports and missing-dependency error handling must also be commented
+clearly so the boundary between engine and GUI remains easy to follow.
+
 ## Implementation order
 
 1. Add the optional GUI dependency to packaging as an extra only.
@@ -137,7 +167,10 @@ No engine physics logic belongs in either module.
 5. Add GUI activation through CLI flags or a thin GUI-specific entry point.
 6. Add graceful dependency-error handling when GUI is requested without the GUI
    extra installed.
-7. Run headless and GUI smoke tests to confirm the engine/GUI separation holds.
+7. Perform a readability review pass: add or refine docstrings, explanatory
+   inline comments, and any overly compressed GUI code paths before
+   considering the GUI phase complete.
+8. Run headless and GUI smoke tests to confirm the engine/GUI separation holds.
 
 ## Test plan
 
@@ -168,12 +201,19 @@ Regression checks:
   installed
 - GUI launch does not change printed engine results or rerun physics in a
   separate code path
+- implementation review checks:
+  - every function and class has a docstring
+  - non-obvious GUI code paths contain explanatory inline comments
+  - unnecessarily clever or compressed constructs are rewritten when a clearer
+    version is practical
 
 Completion criterion for this plan:
 
 - GUI features work as an optional layer on top of the engine
 - missing GUI dependencies fail clearly
 - the engine remains independently usable without any visual stack
+- the GUI code is readable by a non-expert Python reader, with docstrings and
+  comments present across the non-obvious parts of the implementation
 
 ## Assumptions and defaults
 

@@ -22,6 +22,20 @@ The project keeps a single YAML format. GUI settings, when present, live in an
 optional top-level `gui:` section. The engine must not require that section for
 validation or execution.
 
+## Implementation style
+
+This project prioritizes code that is easy to read and learn from:
+
+- prefer readability and explicitness over compact, clever, or highly abstract
+  Python
+- prefer simple control flow and clear intermediate variables over dense
+  one-liners
+- require docstrings on all functions and classes
+- require generous inline comments in non-obvious code paths, especially to
+  explain why a step exists and what is being computed
+- welcome short examples in comments or docstrings when they help a non-expert
+  Python reader
+
 ## Source of requirements
 
 Product requirements remain in
