@@ -36,16 +36,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     print()
 
     detector_rate_map = detector_rates(simulation_result)
-    print("Geometric crossing rates:")
-    for detector in simulation_result.detectors:
-        rate = detector_rate_map[detector.name]["geometric"]
-        print(f"  {detector.name}: {rate.value:.6f} +/- {rate.error:.6f} Hz")
-    print()
-
-    print("Fired rates:")
-    for detector in simulation_result.detectors:
-        rate = detector_rate_map[detector.name]["fired"]
-        print(f"  {detector.name}: {rate.value:.6f} +/- {rate.error:.6f} Hz")
+    print("Detector rates:")
+    print(
+        _format_detector_rate_table(
+            simulation_result,
+            detector_rate_map,
+            rate_decimals=config.output.detector_rate_decimals,
+        )
+    )
     print()
 
     if config.logic_expressions:
@@ -56,32 +54,78 @@ def main(argv: Sequence[str] | None = None) -> int:
             fired_rate = rate_map["fired"]
             print(
                 f"  {expression}\n"
-                f"    geometric: {geometric_rate.value:.6f} +/- {geometric_rate.error:.6f} Hz\n"
-                f"    fired:     {fired_rate.value:.6f} +/- {fired_rate.error:.6f} Hz"
+                f"    geometric: {_format_rate_hz(geometric_rate, config.output.logic_rate_decimals)}\n"
+                f"    fired:     {_format_rate_hz(fired_rate, config.output.logic_rate_decimals)}"
             )
         print()
 
     if config.conditionals:
         print("Conditional probabilities:")
         for conditional in config.conditionals:
-            estimate = conditional_probability(
+            fired_estimate = conditional_probability(
                 conditional.numerator,
                 conditional.given,
                 simulation_result,
-                mode=conditional.mode,
+                mode="fired",
             )
-            if math.isnan(estimate.value):
-                value_text = "nan"
-                error_text = "nan"
-            else:
-                value_text = f"{estimate.value:.6f}"
-                error_text = f"{estimate.error:.6f}"
-            print(
-                f"  {conditional.name} = {value_text} +/- {error_text} "
-                f"(n_cond={estimate.n_cond})"
+            geometric_estimate = conditional_probability(
+                conditional.numerator,
+                conditional.given,
+                simulation_result,
+                mode="geometric",
             )
+            print(f"  {conditional.name}")
+            print(f"    fired:     {_format_probability(fired_estimate)}")
+            print(f"    geometric: {_format_probability(geometric_estimate)}")
 
     return 0
+
+
+def _format_detector_rate_table(
+    simulation_result,
+    detector_rate_map: dict[str, dict],
+    rate_decimals: int,
+) -> str:
+    """Return a detector rate table with aligned geometric and fired columns."""
+    detector_names = [detector.name for detector in simulation_result.detectors]
+    geometric_texts = [
+        _format_rate_hz(detector_rate_map[name]["geometric"], rate_decimals)
+        for name in detector_names
+    ]
+    fired_texts = [
+        _format_rate_hz(detector_rate_map[name]["fired"], rate_decimals)
+        for name in detector_names
+    ]
+
+    det_width = max(len("det"), *(len(name) for name in detector_names))
+    geometric_width = max(len("geometric"), *(len(text) for text in geometric_texts))
+    fired_width = max(len("fired"), *(len(text) for text in fired_texts))
+
+    lines = [
+        f"  {'det':<{det_width}}  {'geometric':<{geometric_width}}  {'fired':<{fired_width}}"
+    ]
+    for name, geometric_text, fired_text in zip(detector_names, geometric_texts, fired_texts):
+        lines.append(
+            f"  {name:<{det_width}}  {geometric_text:<{geometric_width}}  {fired_text:<{fired_width}}"
+        )
+    return "\n".join(lines)
+
+
+def _format_rate_hz(estimate, decimals: int) -> str:
+    """Format a rate estimate with a configurable number of decimal digits."""
+    format_spec = f".{decimals}f"
+    return f"{format(estimate.value, format_spec)} +/- {format(estimate.error, format_spec)} Hz"
+
+
+def _format_probability(estimate) -> str:
+    """Format a conditional probability with per-thousand precision."""
+    if math.isnan(estimate.value):
+        value_text = "nan"
+        error_text = "nan"
+    else:
+        value_text = f"{estimate.value:.3f}"
+        error_text = f"{estimate.error:.3f}"
+    return f"{value_text} +/- {error_text} (n_cond={estimate.n_cond})"
 
 
 def _render_progress(

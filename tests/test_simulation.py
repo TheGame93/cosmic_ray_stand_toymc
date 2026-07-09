@@ -11,7 +11,7 @@ import numpy as np
 
 from toymc_cosmic.config import load_config
 from toymc_cosmic.logic import evaluate
-from toymc_cosmic.simulation import run_simulation
+from toymc_cosmic.simulation import PROGRESS_UPDATE_INTERVAL, run_simulation
 
 
 class SimulationTests(unittest.TestCase):
@@ -33,7 +33,8 @@ class SimulationTests(unittest.TestCase):
 
     def test_progress_callback_reports_each_chunk_and_final_partial_chunk(self) -> None:
         """The simulation should report cumulative progress after every chunk."""
-        config = load_config(self._write_config(n_events=25000))
+        total_events = (2 * PROGRESS_UPDATE_INTERVAL) + 5000
+        config = load_config(self._write_config(n_events=total_events))
         progress_calls: list[tuple[int, int, float]] = []
 
         def record_progress(processed: int, total: int, percent: float) -> None:
@@ -43,10 +44,10 @@ class SimulationTests(unittest.TestCase):
         run_simulation(config, progress_callback=record_progress)
 
         self.assertEqual(len(progress_calls), 3)
-        self.assertEqual(progress_calls[0][0], 10000)
-        self.assertEqual(progress_calls[1][0], 20000)
-        self.assertEqual(progress_calls[2][0], 25000)
-        self.assertTrue(all(total == 25000 for _, total, _ in progress_calls))
+        self.assertEqual(progress_calls[0][0], PROGRESS_UPDATE_INTERVAL)
+        self.assertEqual(progress_calls[1][0], 2 * PROGRESS_UPDATE_INTERVAL)
+        self.assertEqual(progress_calls[2][0], total_events)
+        self.assertTrue(all(total == total_events for _, total, _ in progress_calls))
         self.assertTrue(all(a[0] < b[0] for a, b in zip(progress_calls, progress_calls[1:])))
         self.assertAlmostEqual(progress_calls[-1][2], 100.0)
 

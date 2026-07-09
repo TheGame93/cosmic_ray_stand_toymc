@@ -54,7 +54,10 @@ logic:
     - name: "P(D1 fires | T1 and T2 fire)"
       numerator: "D1"
       given: "T1 and T2"
-      mode: fired
+
+output:
+  detector_rate_decimals: 3
+  logic_rate_decimals: 3
 ```
 
 ### Main configuration fields
@@ -69,6 +72,11 @@ logic:
 - `detectors`: list of detector volumes.
 - `logic.expressions`: detector logic expressions to evaluate as rates.
 - `logic.conditional`: conditional probabilities to report.
+- `output`: optional CLI formatting settings.
+- `output.detector_rate_decimals`: digits after the decimal point for the
+  detector-rate table
+- `output.logic_rate_decimals`: digits after the decimal point for logic
+  expression rates
 - `gui`: optional section preserved for the future GUI layer. It is ignored by
   the headless engine.
 
@@ -134,7 +142,6 @@ Each entry must contain:
 - `name`: label printed in the output
 - `numerator`: expression for the event in the numerator
 - `given`: expression for the conditioning event
-- `mode`: which boolean dataset to use
 
 Example:
 
@@ -144,24 +151,12 @@ logic:
     - name: "P(D1 fires | T1 and T2 fire)"
       numerator: "D1"
       given: "T1 and T2"
-      mode: fired
 ```
 
-Another valid example:
+The engine automatically reports both:
 
-```yaml
-logic:
-  conditional:
-    - name: "P(D1 crossed | T1 and T2 crossed)"
-      numerator: "D1"
-      given: "T1 and T2"
-      mode: geometric
-```
-
-Allowed `mode` values:
-
-- `fired`: use detector firing booleans
-- `geometric`: use pure geometric crossing booleans
+- `fired`: evaluate the conditional on detector firing booleans
+- `geometric`: evaluate the conditional on pure geometric crossing booleans
 
 `numerator` and `given` use the same expression syntax as `logic.expressions`.
 
@@ -178,8 +173,7 @@ The output prints:
 - resolved random seed
 - generated event count
 - generation area
-- geometric crossing rates
-- fired rates
+- detector rate table with geometric and fired columns
 - logic-expression rates
 - conditional probabilities
 

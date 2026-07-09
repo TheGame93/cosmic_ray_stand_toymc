@@ -38,7 +38,14 @@ class ConditionalConfig:
     name: str
     numerator: str
     given: str
-    mode: str
+
+
+@dataclass(frozen=True)
+class OutputConfig:
+    """CLI formatting settings loaded from YAML."""
+
+    detector_rate_decimals: int = 1
+    logic_rate_decimals: int = 1
 
 
 @dataclass(frozen=True)
@@ -54,6 +61,7 @@ class Config:
         detectors: Physical detector definitions.
         logic_expressions: Expressions whose rates should be reported.
         conditionals: Conditional probability requests to evaluate.
+        output: CLI formatting settings.
         gui: Optional GUI config preserved as opaque data for the future GUI layer.
     """
 
@@ -65,6 +73,7 @@ class Config:
     detectors: list[Detector]
     logic_expressions: list[str]
     conditionals: list[ConditionalConfig]
+    output: OutputConfig
     gui: dict[str, Any] | None
 
 
@@ -97,6 +106,7 @@ def load_config(path: str | pathlib.Path) -> Config:
     detector_names = {detector.name for detector in detectors}
 
     logic_expressions, conditionals = _parse_logic(raw_data.get("logic"), detector_names)
+    output = _parse_output(raw_data.get("output"))
     gui = _parse_gui(raw_data.get("gui"))
 
     return Config(
@@ -108,6 +118,7 @@ def load_config(path: str | pathlib.Path) -> Config:
         detectors=detectors,
         logic_expressions=logic_expressions,
         conditionals=conditionals,
+        output=output,
         gui=gui,
     )
 
@@ -206,7 +217,6 @@ def _parse_logic(raw_logic: Any, detector_names: set[str]) -> tuple[list[str], l
         name = raw_conditional.get("name")
         numerator = raw_conditional.get("numerator")
         given = raw_conditional.get("given")
-        mode = raw_conditional.get("mode", "fired")
 
         if not isinstance(name, str) or not name:
             raise ConfigError("Each conditional entry must have a non-empty string name.")
@@ -214,14 +224,16 @@ def _parse_logic(raw_logic: Any, detector_names: set[str]) -> tuple[list[str], l
             raise ConfigError(f"Conditional {name!r} must provide a numerator expression.")
         if not isinstance(given, str) or not given:
             raise ConfigError(f"Conditional {name!r} must provide a given expression.")
-        if mode not in {"fired", "geometric"}:
-            raise ConfigError(f"Conditional {name!r} mode must be 'fired' or 'geometric'.")
+        if "mode" in raw_conditional:
+            raise ConfigError(
+                f"Conditional {name!r} must not define mode; both fired and geometric are reported automatically."
+            )
 
         _validate_expression_names(numerator, detector_names)
         _validate_expression_names(given, detector_names)
 
         conditionals.append(
-            ConditionalConfig(name=name, numerator=numerator, given=given, mode=mode)
+            ConditionalConfig(name=name, numerator=numerator, given=given)
         )
 
     return validated_expressions, conditionals
@@ -249,8 +261,38 @@ def _parse_gui(raw_gui: Any) -> dict[str, Any] | None:
     return raw_gui
 
 
+def _parse_output(raw_output: Any) -> OutputConfig:
+    """Parse optional CLI output-format settings."""
+    if raw_output is None:
+        return OutputConfig()
+    if not isinstance(raw_output, dict):
+        raise ConfigError("output must be a mapping when provided.")
+
+    detector_rate_decimals = _read_non_negative_int(
+        raw_output.get("detector_rate_decimals", 1),
+        "output.detector_rate_decimals",
+    )
+    logic_rate_decimals = _read_non_negative_int(
+        raw_output.get("logic_rate_decimals", 1),
+        "output.logic_rate_decimals",
+    )
+    return OutputConfig(
+        detector_rate_decimals=detector_rate_decimals,
+        logic_rate_decimals=logic_rate_decimals,
+    )
+
+
 def _read_float(value: Any, field_name: str) -> float:
     """Read a numeric field and convert it to float."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"{field_name} must be numeric.")
     return float(value)
+
+
+def _read_non_negative_int(value: Any, field_name: str) -> int:
+    """Read a non-negative integer setting from the YAML file."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ConfigError(f"{field_name} must be an integer.")
+    if value < 0:
+        raise ConfigError(f"{field_name} must be non-negative.")
+    return value

@@ -4,7 +4,7 @@ theta_max_deg: 80.0
 angular_model:
   type: cos2
 
-flux_hz_per_cm2: 1
+flux_hz_per_cm2: 0.01
 
 monte_carlo:
   n_events: 20000000
@@ -32,14 +32,16 @@ logic:
     - "T1 and T2"
     - "T1 and T2 and T3"
   conditional:
+    - name: "P(D1 fires | T1 and T2 fire)"
+      numerator: "D1"
+      given: "T1 and T2"
     - name: "P(D1 fires | T1 and T2 and T3 fire)"
       numerator: "D1"
       given: "T1 and T2 and T3"
-      mode: fired
-    - name: "P(D1 fires | T1 and T2 and T3 fire)"
-      numerator: "D1"
-      given: "T1 and T2 and T3"
-      mode: geometric
+
+output:
+  detector_rate_decimals: 3
+  logic_rate_decimals: 3
 
 gui:
   background_color: black
