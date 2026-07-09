@@ -153,3 +153,53 @@ class CliTests(unittest.TestCase):
         run_simulation_mock.assert_called_once()
         print_summary_mock.assert_called_once_with(config, simulation_result)
         show_event_display_mock.assert_called_once_with(config, simulation_result)
+
+    @mock.patch("toymc_cosmic.cli._print_headless_summary")
+    @mock.patch("toymc_cosmic.cli.show_event_display")
+    @mock.patch("toymc_cosmic.cli.run_simulation")
+    @mock.patch("toymc_cosmic.cli.load_config")
+    def test_event_display_mode_exits_cleanly_when_no_conditionals_are_configured(
+        self,
+        load_config_mock: mock.Mock,
+        run_simulation_mock: mock.Mock,
+        show_event_display_mock: mock.Mock,
+        print_summary_mock: mock.Mock,
+    ) -> None:
+        """Event-display GUI mode should surface a clean error instead of a traceback."""
+        config = object()
+        simulation_result = object()
+        load_config_mock.return_value = config
+        run_simulation_mock.return_value = simulation_result
+        show_event_display_mock.side_effect = ValueError(
+            "Event display requires at least one logic.conditional entry because relevant tracks are conditional-driven."
+        )
+
+        with self.assertRaises(SystemExit):
+            main(["config.yaml", "--gui", "--event-display"])
+
+        print_summary_mock.assert_called_once_with(config, simulation_result)
+
+    @mock.patch("toymc_cosmic.cli._print_headless_summary")
+    @mock.patch("toymc_cosmic.cli.show_event_display")
+    @mock.patch("toymc_cosmic.cli.run_simulation")
+    @mock.patch("toymc_cosmic.cli.load_config")
+    def test_event_display_mode_exits_cleanly_when_no_relevant_tracks_exist(
+        self,
+        load_config_mock: mock.Mock,
+        run_simulation_mock: mock.Mock,
+        show_event_display_mock: mock.Mock,
+        print_summary_mock: mock.Mock,
+    ) -> None:
+        """Event-display GUI mode should stop cleanly when no relevant tracks exist."""
+        config = object()
+        simulation_result = object()
+        load_config_mock.return_value = config
+        run_simulation_mock.return_value = simulation_result
+        show_event_display_mock.side_effect = ValueError(
+            "No geometrically relevant tracks were found for the configured conditionals."
+        )
+
+        with self.assertRaises(SystemExit):
+            main(["config.yaml", "--gui", "--event-display"])
+
+        print_summary_mock.assert_called_once_with(config, simulation_result)

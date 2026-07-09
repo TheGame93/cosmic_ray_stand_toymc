@@ -4,7 +4,8 @@
 
 This plan covers only the standalone Monte Carlo engine described in
 [desiderata.md](/home/matteo/programmi/toyMC_cosmic/docs/desiderata.md).
-The deliverable is a reusable Python package plus a terminal-only CLI runner.
+The deliverable is a reusable local Python codebase plus a terminal-only CLI
+runner.
 No GUI code, `pyvista` dependency, viewer logic, or visual CLI flags belong in
 this phase.
 
@@ -35,7 +36,7 @@ intended to be understood by a non-expert Python reader.
 - Short examples in docstrings or comments are encouraged when they remove
   ambiguity for a beginner reader.
 
-## Package layout
+## Repository layout
 
 ```text
 toyMC_cosmic/
@@ -44,7 +45,8 @@ toyMC_cosmic/
 │   ├── plan.md
 │   ├── plan_engine.md
 │   └── plan_GUI.md
-├── pyproject.toml
+├── requirements.txt
+├── run_toymc.sh
 ├── configs/
 │   └── example.yaml
 ├── scripts/
@@ -347,8 +349,9 @@ In this phase:
 
 ## Implementation order
 
-1. Create package scaffolding, `pyproject.toml`, `configs/example.yaml`, and
-   the thin `scripts/run_toymc.py` wrapper.
+1. Create the repo-local scaffolding, `requirements.txt`,
+   `configs/example.yaml`, `run_toymc.sh`, and the thin `scripts/run_toymc.py`
+   wrapper.
 2. Implement `geometry.py` and unit tests for hit, miss, and tangent cases.
 3. Implement `angular.py` and tests for sampling correctness and normalization.
 4. Implement `config.py` and validation tests, including duplicate-name and
@@ -366,7 +369,7 @@ In this phase:
     inline comments, and any overly compressed code paths before considering the
     engine phase complete.
 12. Run the full engine test suite and confirm the project is fully usable
-    without any GUI package installed.
+    without any GUI dependency installed.
 
 ## Test plan
 
@@ -396,13 +399,13 @@ Required tests:
 
 Manual verification:
 
-- `python scripts/run_toymc.py configs/example.yaml`
+- `./run_toymc.sh configs/example.yaml`
 - inspect the printed seed, event count, detector rates, logic rates, and
   conditional probabilities
 
 Completion criterion for this plan:
 
-- the package, tests, and CLI all work in a headless environment
+- the local codebase, tests, and CLI all work in a headless environment
 - no GUI dependency is needed
 - the resulting `SimulationResult` is rich enough for the later GUI plan
 - the code is readable by a non-expert Python reader, with docstrings and

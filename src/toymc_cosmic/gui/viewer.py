@@ -34,6 +34,8 @@ class EventDisplayState:
     """One viewer state for one event and one relevant conditional."""
 
     event_index: int
+    relevant_event_index: int
+    relevant_event_count: int
     conditional_index: int | None
     step_index_within_event: int
     step_count_within_event: int
@@ -60,32 +62,35 @@ class EventNavigator:
 
     def __init__(
         self,
-        simulation_result: SimulationResult,
+        relevant_event_indices: list[int],
         prepared_conditionals: list[PreparedConditional],
         gui_config: GUIConfig,
     ) -> None:
         """Build a lazy navigator over event display states."""
-        self._simulation_result = simulation_result
+        if not relevant_event_indices:
+            raise ValueError("Event display requires at least one relevant track.")
+
+        self._relevant_event_indices = relevant_event_indices
         self._prepared_conditionals = prepared_conditionals
         self._gui_config = gui_config
         self._event_states_cache: dict[int, list[EventDisplayState]] = {}
-        self._event_index = 0
+        self._relevant_event_index = 0
         self._state_index_within_event = 0
 
     def current_state(self) -> EventDisplayState:
         """Return the state currently selected by the navigator."""
-        event_states = self._states_for_event(self._event_index)
+        event_states = self._states_for_current_event()
         return event_states[self._state_index_within_event]
 
     def next_state(self) -> EventDisplayState:
         """Advance to the next conditional state or the next event."""
-        event_states = self._states_for_event(self._event_index)
+        event_states = self._states_for_current_event()
         if self._state_index_within_event + 1 < len(event_states):
             self._state_index_within_event += 1
             return self.current_state()
 
-        if self._event_index + 1 < self._simulation_result.n_events:
-            self._event_index += 1
+        if self._relevant_event_index + 1 < len(self._relevant_event_indices):
+            self._relevant_event_index += 1
             self._state_index_within_event = 0
         return self.current_state()
 
@@ -95,17 +100,20 @@ class EventNavigator:
             self._state_index_within_event -= 1
             return self.current_state()
 
-        if self._event_index > 0:
-            self._event_index -= 1
-            previous_event_states = self._states_for_event(self._event_index)
+        if self._relevant_event_index > 0:
+            self._relevant_event_index -= 1
+            previous_event_states = self._states_for_current_event()
             self._state_index_within_event = len(previous_event_states) - 1
         return self.current_state()
 
-    def _states_for_event(self, event_index: int) -> list[EventDisplayState]:
-        """Build and cache the display states needed for one event."""
+    def _states_for_current_event(self) -> list[EventDisplayState]:
+        """Return the cached states for the currently selected relevant event."""
+        event_index = self._relevant_event_indices[self._relevant_event_index]
         if event_index not in self._event_states_cache:
             self._event_states_cache[event_index] = build_event_states_for_event(
                 event_index,
+                self._relevant_event_index,
+                len(self._relevant_event_indices),
                 self._prepared_conditionals,
                 self._gui_config,
             )
@@ -114,10 +122,20 @@ class EventNavigator:
 
 def show_event_display(config: Config, simulation_result: SimulationResult) -> None:
     """Open the step-by-step event display viewer."""
+    if not config.conditionals:
+        raise ValueError(
+            "Event display requires at least one logic.conditional entry because relevant tracks are conditional-driven."
+        )
+
     gui_config = load_gui_config(config)
     prepared_conditionals = prepare_conditionals(config, simulation_result)
+    relevant_event_indices = collect_relevant_event_indices(prepared_conditionals)
+    if not relevant_event_indices:
+        raise ValueError(
+            "No geometrically relevant tracks were found for the configured conditionals."
+        )
     display_bounds = compute_display_bounds(config.detectors, config.theta_max)
-    navigator = EventNavigator(simulation_result, prepared_conditionals, gui_config)
+    navigator = EventNavigator(relevant_event_indices, prepared_conditionals, gui_config)
     controller = EventDisplayController(
         config=config,
         simulation_result=simulation_result,
@@ -149,8 +167,21 @@ def prepare_conditionals(
     return prepared
 
 
+def collect_relevant_event_indices(prepared_conditionals: list[PreparedConditional]) -> list[int]:
+    """Return event indices relevant to at least one conditional in geometric mode."""
+    if not prepared_conditionals:
+        return []
+
+    relevant_mask = np.zeros_like(prepared_conditionals[0].geometric_given, dtype=bool)
+    for conditional in prepared_conditionals:
+        relevant_mask |= conditional.geometric_given
+    return np.flatnonzero(relevant_mask).tolist()
+
+
 def build_event_states_for_event(
     event_index: int,
+    relevant_event_index: int,
+    relevant_event_count: int,
     prepared_conditionals: list[PreparedConditional],
     gui_config: GUIConfig,
 ) -> list[EventDisplayState]:
@@ -162,18 +193,7 @@ def build_event_states_for_event(
     ]
 
     if not relevant_conditionals:
-        return [
-            EventDisplayState(
-                event_index=event_index,
-                conditional_index=None,
-                step_index_within_event=0,
-                step_count_within_event=1,
-                conditional_name=None,
-                state_name="default",
-                state_description="No geometrically relevant conditional for this event.",
-                track_color=gui_config.default_track_color,
-            )
-        ]
+        return []
 
     event_states: list[EventDisplayState] = []
     step_count = len(relevant_conditionals)
@@ -194,6 +214,8 @@ def build_event_states_for_event(
         event_states.append(
             EventDisplayState(
                 event_index=event_index,
+                relevant_event_index=relevant_event_index,
+                relevant_event_count=relevant_event_count,
                 conditional_index=conditional.index,
                 step_index_within_event=step_index,
                 step_count_within_event=step_count,
@@ -355,7 +377,8 @@ class EventDisplayController:
 def _build_status_text(state: EventDisplayState, total_events: int) -> str:
     """Build the overlay text shown inside the event display."""
     lines = [
-        f"Event: {state.event_index + 1} / {total_events}",
+        f"Relevant track: {state.relevant_event_index + 1} / {state.relevant_event_count}",
+        f"Original event: {state.event_index + 1} / {total_events}",
         f"State in event: {state.step_index_within_event + 1} / {state.step_count_within_event}",
         f"Track state: {state.state_name}",
         state.state_description,

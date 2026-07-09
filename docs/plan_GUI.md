@@ -51,7 +51,8 @@ The GUI code should be understandable to a non-expert Python reader.
 
 ## Dependency and runtime model
 
-The GUI should live in separate modules under the existing package, for
+The GUI should live in separate modules under the existing local Python
+codebase, for
 example:
 
 ```text
@@ -79,8 +80,7 @@ Runtime model for this phase:
   - launches the local application from the repository checkout
 - update the README to document this venv-based workflow
 
-The old package-style entry point is no longer the primary UX target for the
-GUI phase.
+Package-style installation is not part of the intended GUI workflow.
 
 If GUI is requested without GUI dependencies installed, the application must
 fail gracefully with a clear install message and must not break headless usage.
@@ -184,8 +184,8 @@ Event display flow:
   - `(event 17, conditional 2)`
   - `(event 17, conditional 3)`
   - `(event 18, conditional 1)`
-- if an event has no geometrically relevant conditional, it still gets one
-  default display state before advancing to the next event
+- only geometrically relevant events are included in navigation
+- if an event has no geometrically relevant conditional, it is skipped
 
 The event display must read directly from the engine `SimulationResult`
 booleans and track arrays. It must not infer event state by recomputing
@@ -222,8 +222,8 @@ fired-mode conditional state with three user-configurable colors:
 - fired-joint state:
   - both `given` and `numerator` are true in fired mode
 
-If no conditional is geometrically relevant for the current event, use the
-default track color for the single default display state of that event.
+If no conditional is geometrically relevant for any event in the simulation,
+event-display mode should fail clearly instead of opening an empty viewer.
 
 ### Event track segment bounds
 

@@ -1,30 +1,148 @@
 # toyMC_cosmic
 
-Toy Monte Carlo for simulating the geometric acceptance and detector-response
-rates of a cosmic ray stand.
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python 3.12">
+  <img src="https://img.shields.io/badge/workflow-local%20script%20%2B%20venv-success" alt="Local script and venv workflow">
+  <img src="https://img.shields.io/badge/gui-pyvista%20optional-orange" alt="Optional PyVista GUI">
+  <img src="https://img.shields.io/badge/status-active-brightgreen" alt="Active status">
+</p>
 
-The current implementation is the headless engine only. It reads a YAML
-configuration file, generates straight cosmic-ray tracks, computes geometric
-crossings, applies detector efficiencies, and prints rates and conditional
-probabilities to the terminal.
+<table>
+  <tr>
+    <td>
+      <strong>Toy Monte Carlo for cosmic-ray stands</strong><br>
+      Simulate geometric acceptance, detector response, logic rates, and conditional probabilities from a YAML configuration.
+    </td>
+  </tr>
+</table>
 
-## Requirements
+> [!NOTE]
+> This repo is meant to be run locally from the checkout with `./run_toymc.sh`.
+> The launcher creates `.venv/`, installs dependencies from `requirements.txt`,
+> and starts the CLI from this repository.
 
-- Python 3.12
-- a local `venv` created inside the repository folder
+## Quick Start
 
-The launcher script installs the Python dependencies automatically into
-`.venv/` using [requirements.txt](/home/matteo/programmi/toyMC_cosmic/requirements.txt).
+Clone or copy the repository, then run one of these:
+
+```bash
+./run_toymc.sh configs/example.yaml                       # headless rates and probabilities
+./run_toymc.sh configs/example.yaml --gui --geometry-only # detector geometry only
+./run_toymc.sh configs/example.yaml --gui --event-display # relevant tracks only
+```
+
+## Table of Contents
+
+- [What It Does](#what-it-does)
+- [How To Run](#how-to-run)
+- [GUI Modes](#gui-modes)
+- [Configuration](#configuration)
+- [Logic and Conditionals](#logic-and-conditionals)
+- [GUI Colors and Track States](#gui-colors-and-track-states)
+- [Manual Venv Setup](#manual-venv-setup)
+- [Tests](#tests)
+- [Notes](#notes)
+
+## What It Does
+
+The current implementation is a geometric toy Monte Carlo engine with an
+optional GUI layer. It:
+
+- reads a YAML configuration file
+- generates straight cosmic-ray tracks
+- computes detector crossings
+- applies detector efficiencies
+- prints detector rates, logic rates, and conditional probabilities
+- optionally opens a 3D detector viewer or a relevant-track event display
+
+## How To Run
+
+The main entry point is:
+
+```bash
+./run_toymc.sh configs/example.yaml
+```
+
+On the first run, the script will:
+
+- create `.venv/` in the repository root
+- install dependencies from `requirements.txt`
+- run the local CLI from this checkout
+
+Later runs reuse the same environment unless `requirements.txt` changes.
+
+<details>
+<summary><strong>Expected headless output</strong></summary>
+
+- resolved random seed
+- generated event count
+- generation area
+- detector rate table with geometric and fired columns
+- logic-expression rates
+- conditional probabilities
+
+</details>
+
+## GUI Modes
+
+### Geometry Only
+
+```bash
+./run_toymc.sh configs/example.yaml --gui --geometry-only
+```
+
+This opens a rotatable 3D view of the detector geometry without running the
+Monte Carlo.
+
+### Event Display
+
+```bash
+./run_toymc.sh configs/example.yaml --gui --event-display
+```
+
+This runs the simulation once and then shows only relevant tracks.
+
+- left/right arrow keys step backward or forward
+- `q` or `Escape` closes the viewer
+- a track is relevant when at least one conditional `given` expression is true
+  in geometric mode for that event
+- if one track is relevant for more than one conditional, the GUI cycles
+  through those conditionals before moving to the next relevant track
+- detector colors mean:
+  - green: crossed and fired
+  - red: crossed and not fired
+  - base color: not crossed
+- if `logic.conditional` is empty, event-display mode exits with a clear
+  message
+- if no relevant tracks are found, event-display mode exits with a clear
+  message
 
 ## Configuration
 
 The engine is configured through YAML.
 
-Example:
+<details open>
+<summary><strong>Minimal field overview</strong></summary>
+
+- `seed`: fixed integer seed, or `null` to derive it from local time
+- `theta_max_deg`: maximum zenith angle in degrees
+- `angular_model.type`: currently only `cos2`
+- `flux_hz_per_cm2`: total downward flux over the simulated cone
+- `monte_carlo.n_events`: number of generated events
+- `detectors`: list of detector volumes
+- `logic.expressions`: boolean detector expressions to evaluate as rates
+- `logic.conditional`: conditional probabilities to report
+- `output`: CLI formatting settings
+- `gui`: optional GUI-only settings
+
+</details>
+
+<details>
+<summary><strong>Full example YAML</strong></summary>
 
 ```yaml
 seed: 123456
-theta_max_deg: 80.0
+theta_max_deg: 80
 
 angular_model:
   type: cos2
@@ -36,53 +154,63 @@ monte_carlo:
 
 detectors:
   - name: T1
-    center: [0.0, 0.0, 100.0]
-    size: [20.0, 20.0, 1.0]
-    efficiency: 0.98
-  - name: T2
-    center: [0.0, 0.0, 50.0]
-    size: [20.0, 20.0, 1.0]
-    efficiency: 0.95
+    center: [0.0, 0.0, 20.0]
+    size: [10.0, 10.0, 1.0]
+    efficiency: 0.8
+  - name: T3
+    center: [0.0, 0.0, 11.0]
+    size: [6.0, 5.0, 1.0]
+    efficiency: 0.8
   - name: D1
+    center: [0.0, 0.0, 9.0]
+    size: [6.0, 5.0, 0.3]
+    efficiency: 1
+  - name: T2
     center: [0.0, 0.0, 0.0]
-    size: [20.0, 20.0, 1.0]
-    efficiency: 0.90
+    size: [10.0, 10.0, 1.0]
+    efficiency: 0.8
 
 logic:
   expressions:
-    - "T1 and T2 and D1"
-    - "T1 and T2 and not D1"
+    - "T1 and T2"
+    - "T1 and T2 and T3"
   conditional:
-    - name: "P(D1 fires | T1 and T2 fire)"
+    - name: "D1|T1*T2"
       numerator: "D1"
       given: "T1 and T2"
+    - name: "D1|T1*T2*T3"
+      numerator: "D1"
+      given: "T1 and T2 and T3"
 
 output:
   detector_rate_decimals: 3
   logic_rate_decimals: 3
+
+gui:
+  # Accepted color examples:
+  # - named colors such as black, lightgray, orange, lime
+  # - named colors reference: Matplotlib named colors
+  #   https://matplotlib.org/stable/gallery/color/named_colors.html
+  # - hex strings such as "#ff8800"
+  # - RGB triples such as [0.2, 0.6, 1.0]
+  background_color: white
+  default_detector_color: lightgray
+  detector_colors:
+    T1: black
+    T3: black
+    D1: gray
+    T2: black
+  default_track_color: black
+  track_color_geometric_only: orange
+  track_color_fired_given_only: red
+  track_color_fired_joint: green
+  line_width: 4.0
 ```
 
-### Main configuration fields
+</details>
 
-- `seed`: integer seed for reproducible runs. Use `null` to derive it from the
-  local time.
-- `theta_max_deg`: maximum zenith angle in degrees. Must be between `0` and
-  `90`.
-- `angular_model.type`: currently only `cos2` is supported.
-- `flux_hz_per_cm2`: total downward flux over the simulated angular cone.
-- `monte_carlo.n_events`: number of generated events.
-- `detectors`: list of detector volumes.
-- `logic.expressions`: detector logic expressions to evaluate as rates.
-- `logic.conditional`: conditional probabilities to report.
-- `output`: optional CLI formatting settings.
-- `output.detector_rate_decimals`: digits after the decimal point for the
-  detector-rate table
-- `output.logic_rate_decimals`: digits after the decimal point for logic
-  expression rates
-- `gui`: optional section used by the GUI layer and ignored by the headless
-  engine.
-
-### Detector fields
+<details>
+<summary><strong>Detector fields</strong></summary>
 
 Each detector entry must contain:
 
@@ -91,12 +219,14 @@ Each detector entry must contain:
 - `size`: `[dx, dy, dz]`
 - `efficiency`: number between `0` and `1`
 
-### Writing logic expressions
+</details>
 
-`logic.expressions` is a YAML list of strings. Each string is a boolean
-expression built from detector names.
+## Logic and Conditionals
 
-Allowed syntax:
+<details>
+<summary><strong>Trimmed logic reference</strong></summary>
+
+Allowed expression syntax:
 
 - detector names such as `T1`, `T2`, `D1`
 - `and`
@@ -104,69 +234,38 @@ Allowed syntax:
 - `not`
 - parentheses
 
-Examples:
+Short example:
 
 ```yaml
 logic:
   expressions:
-    - "T1"
     - "T1 and T2"
-    - "T1 and T2 and D1"
     - "T1 and T2 and not D1"
-    - "T1 and (T2 or D1)"
 ```
 
-Important rules:
-
-- detector names must match exactly the names defined in `detectors`
-- expressions must be quoted strings in YAML
-- only boolean logic is allowed
-
-Not allowed:
-
-- comparisons such as `"T1 == T2"`
-- arithmetic such as `"T1 + T2"`
-- function calls such as `"T1()"`
-
-The engine validates expressions before running the simulation.
-
-### Writing conditional probabilities
-
-`logic.conditional` is a YAML list. Each entry asks the engine to compute a
-conditional probability of the form:
-
-```text
-P(numerator | given)
-```
-
-Each entry must contain:
-
-- `name`: label printed in the output
-- `numerator`: expression for the event in the numerator
-- `given`: expression for the conditioning event
-
-Example:
+Conditionals use the same expression syntax:
 
 ```yaml
 logic:
   conditional:
-    - name: "P(D1 fires | T1 and T2 fire)"
+    - name: "D1|T1*T2"
       numerator: "D1"
       given: "T1 and T2"
 ```
 
-The engine automatically reports both:
+The engine reports each conditional in both modes:
 
-- `fired`: evaluate the conditional on detector firing booleans
-- `geometric`: evaluate the conditional on pure geometric crossing booleans
+- `geometric`: evaluated on detector crossings
+- `fired`: evaluated on detector firing booleans
 
-`numerator` and `given` use the same expression syntax as `logic.expressions`.
+</details>
 
-### GUI configuration
+## GUI Colors and Track States
 
-The optional `gui:` section controls colors and line width for visualization.
+<details>
+<summary><strong>GUI color fields</strong></summary>
 
-Supported fields:
+Supported GUI fields:
 
 - `background_color`
 - `default_detector_color`
@@ -183,24 +282,34 @@ Color values can be written as:
 - hex strings such as `"#ff8800"`
 - RGB triples such as `[0.2, 0.6, 1.0]`
 
-## Running the engine
+</details>
 
-The main entry point is the root launcher script:
+<details open>
+<summary><strong>What the three track-color fields mean</strong></summary>
 
-```bash
-./run_toymc.sh configs/example.yaml
-```
+In event-display mode, the currently shown track color is chosen from these
+three fields according to the conditional state being displayed:
 
-On the first run, `run_toymc.sh` will:
+- `track_color_geometric_only`
+  - use this when the conditional `given` is true geometrically
+  - but the same `given` is false in fired mode
+- `track_color_fired_given_only`
+  - use this when the conditional `given` is true in fired mode
+  - but the conditional `numerator` is false
+- `track_color_fired_joint`
+  - use this when both the conditional `given` and `numerator` are true in
+    fired mode
 
-- create `.venv/` in the repository root if it does not exist
-- install the dependencies from `requirements.txt`
-- launch the local CLI from this checkout
+So when the README says “the track color depends on the currently shown
+conditional state”, it means the GUI picks one of these three config fields for
+the specific `(track, conditional)` view currently on screen.
 
-Later runs reuse the same virtual environment unless `requirements.txt`
-changes.
+</details>
 
-If you want to inspect or use the environment manually:
+## Manual Venv Setup
+
+<details>
+<summary><strong>Prepare the same local environment manually</strong></summary>
 
 ```bash
 python3 -m venv .venv
@@ -208,72 +317,34 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-For local development, the Python wrapper script still exists:
+If you already activated that environment yourself, you can also run:
 
 ```bash
 python3 scripts/run_toymc.py configs/example.yaml
 ```
 
-That wrapper is mainly useful if you already manage the Python environment
-yourself.
+</details>
 
-### Headless mode
+## Tests
 
-Run the standard terminal-only simulation:
-
-```bash
-./run_toymc.sh configs/example.yaml
-```
-
-The output prints:
-
-- resolved random seed
-- generated event count
-- generation area
-- detector rate table with geometric and fired columns
-- logic-expression rates
-- conditional probabilities
-
-### Geometry-only GUI
-
-Open a rotatable detector-only 3D scene without running the Monte Carlo:
-
-```bash
-./run_toymc.sh configs/example.yaml --gui --geometry-only
-```
-
-### Event-display GUI
-
-Run the simulation once, then step through events in the GUI:
-
-```bash
-./run_toymc.sh configs/example.yaml --gui --event-display
-```
-
-Current event-display behavior:
-
-- left/right arrow keys step backward or forward
-- `q` or `Escape` closes the viewer
-- detector colors show:
-  - green when crossed and fired
-  - red when crossed and not fired
-  - base color otherwise
-- the track color depends on the currently shown conditional state
-- if multiple conditionals are geometrically relevant for one event, the GUI
-  cycles through them before advancing to the next event
-
-## Running the tests
-
-The current test suite uses the standard library `unittest` runner:
+<details>
+<summary><strong>Run the test suite</strong></summary>
 
 ```bash
 PYTHONPATH=src .venv/bin/python -m unittest discover -s tests -v
 ```
 
+</details>
+
 ## Notes
+
+<details>
+<summary><strong>Project notes</strong></summary>
 
 - The current engine is intentionally geometric and simple.
 - It does not simulate energy loss, material interactions, multiple scattering,
   timing, or secondaries.
 - The GUI is optional and uses `PyVista` through lazy imports.
 - Headless CLI usage still works without importing GUI modules at runtime.
+
+</details>

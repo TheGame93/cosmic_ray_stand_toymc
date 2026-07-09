@@ -53,7 +53,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     _print_headless_summary(config, simulation_result)
 
     if args.gui and args.event_display:
-        show_event_display(config, simulation_result)
+        try:
+            show_event_display(config, simulation_result)
+        except ValueError as exc:
+            parser.error(str(exc))
 
     return 0
 

@@ -1,4 +1,4 @@
-"""Thin wrapper so the engine can be run without installing the package."""
+"""Thin repo-local wrapper that runs the CLI from this checkout."""
 
 from __future__ import annotations
 

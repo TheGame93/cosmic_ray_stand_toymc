@@ -9,12 +9,12 @@ This repo now uses a two-step implementation plan derived from
 2. [plan_GUI.md](/home/matteo/programmi/toyMC_cosmic/docs/plan_GUI.md)
    Build the optional visualization layer on top of the completed engine.
 
-Operational direction for the GUI phase:
+Operational direction for the current repo workflow:
 
 - the engine remains reusable as Python code internally
 - the primary user workflow shifts to a local project folder with a root shell
   launcher and a project-local virtual environment
-- package-style installation is no longer the primary UX target
+- package-style installation is not part of the intended UX
 
 ## Dependency direction
 
