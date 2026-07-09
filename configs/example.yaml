@@ -1,5 +1,5 @@
 seed: 123456
-theta_max_deg: 80.0
+theta_max_deg: 80
 
 angular_model:
   type: cos2
