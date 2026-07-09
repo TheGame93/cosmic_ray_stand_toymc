@@ -74,12 +74,35 @@ Later runs reuse the same environment unless `requirements.txt` changes.
 <details>
 <summary><strong>Expected headless output</strong></summary>
 
-- resolved random seed
-- generated event count
-- generation area
-- detector rate table with geometric and fired columns
-- logic-expression rates
-- conditional probabilities
+```bash
+$ ./run_toymc.sh configs/example.yaml
+Progress: 2000000 / 2000000 (100.00%)
+Seed: 123456
+Generated events: 2000000  (A_gen = 61600.180 cm^2)
+
+Detector rates:
+  det  geometric           fired
+  T1   1.121 +/- 0.019 Hz  0.902 +/- 0.017 Hz
+  T3   0.349 +/- 0.010 Hz  0.288 +/- 0.009 Hz
+  D1   0.318 +/- 0.010 Hz  0.318 +/- 0.010 Hz
+  T2   1.142 +/- 0.019 Hz  0.921 +/- 0.017 Hz
+
+Logic expressions:
+  T1 and T2
+    geometric: 0.152 +/- 0.007 Hz
+    fired:     0.099 +/- 0.006 Hz
+  T1 and T2 and T3
+    geometric: 0.087 +/- 0.005 Hz
+    fired:     0.048 +/- 0.004 Hz
+
+Conditional probabilities:
+  D1|T1*T2
+    fired:     0.570 +/- 0.028 (n_cond=321)
+    geometric: 0.564 +/- 0.022 (n_cond=495)
+  D1|T1*T2*T3
+    fired:     0.949 +/- 0.018 (n_cond=156)
+    geometric: 0.950 +/- 0.013 (n_cond=281)
+```
 
 </details>
 
