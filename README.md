@@ -162,11 +162,26 @@ The engine automatically reports both:
 
 ## Running the engine
 
-Run the example configuration with the script:
+There are two equivalent ways to run the engine.
+
+If you are working directly from this repository without installing the package,
+use the wrapper script:
 
 ```bash
 python3 scripts/run_toymc.py configs/example.yaml
 ```
+
+If you installed the package, use the console command defined in
+`pyproject.toml`:
+
+```bash
+toymc-cosmic configs/example.yaml
+```
+
+The `toymc-cosmic` command is the installed CLI entry point. It runs the
+`main()` function in `src/toymc_cosmic/cli.py`. The `scripts/run_toymc.py`
+wrapper exists so the same CLI can be used directly from the repository
+without installation.
 
 The output prints:
 

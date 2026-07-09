@@ -7,7 +7,7 @@ angular_model:
 flux_hz_per_cm2: 0.01
 
 monte_carlo:
-  n_events: 20000000
+  n_events: 2000000
 
 detectors:
   - name: T1
