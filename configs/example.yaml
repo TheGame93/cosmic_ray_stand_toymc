@@ -11,27 +11,35 @@ monte_carlo:
 
 detectors:
   - name: T1
-    center: [0.0, 0.0, 100.0]
+    center: [0.0, 0.0, 20.0]
     size: [10.0, 10.0, 1.0]
+    efficiency: 0.8
+  - name: T3
+    center: [0.0, 0.0, 11.0]
+    size: [ 6.0,  5.0, 1.0]
+    efficiency: 0.8
+  - name: D1
+    center: [0.0, 0.0,  9.0]
+    size: [ 6.0,  5.0, 0.3]
     efficiency: 1
   - name: T2
-    center: [0.0, 0.0, 50.0]
-    size: [10.0, 10.0, 1.0]
-    efficiency: 1
-  - name: D1
     center: [0.0, 0.0, 0.0]
     size: [10.0, 10.0, 1.0]
-    efficiency: 1
+    efficiency: 0.8
 
 logic:
   expressions:
-    - "T1 and T2 and D1"
-    - "T1 and T2 and not D1"
+    - "T1 and T2"
+    - "T1 and T2 and T3"
   conditional:
-    - name: "P(D1 fires | T1 and T2 fire)"
+    - name: "P(D1 fires | T1 and T2 and T3 fire)"
       numerator: "D1"
-      given: "T1 and T2"
+      given: "T1 and T2 and T3"
       mode: fired
+    - name: "P(D1 fires | T1 and T2 and T3 fire)"
+      numerator: "D1"
+      given: "T1 and T2 and T3"
+      mode: geometric
 
 gui:
   background_color: black

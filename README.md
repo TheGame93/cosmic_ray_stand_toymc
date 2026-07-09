@@ -14,25 +14,6 @@ probabilities to the terminal.
 - `numpy`
 - `PyYAML`
 
-You can install the package in editable mode with:
-
-```bash
-python3 -m pip install -e .
-```
-
-If you also want the declared development dependency for future `pytest` use:
-
-```bash
-python3 -m pip install -e .[dev]
-```
-
-## Project layout
-
-- `configs/example.yaml`: example engine configuration
-- `scripts/run_toymc.py`: direct runner script
-- `src/toymc_cosmic/`: engine package
-- `tests/`: headless engine test suite
-
 ## Configuration
 
 The engine is configured through YAML.
@@ -100,18 +81,96 @@ Each detector entry must contain:
 - `size`: `[dx, dy, dz]`
 - `efficiency`: number between `0` and `1`
 
+### Writing logic expressions
+
+`logic.expressions` is a YAML list of strings. Each string is a boolean
+expression built from detector names.
+
+Allowed syntax:
+
+- detector names such as `T1`, `T2`, `D1`
+- `and`
+- `or`
+- `not`
+- parentheses
+
+Examples:
+
+```yaml
+logic:
+  expressions:
+    - "T1"
+    - "T1 and T2"
+    - "T1 and T2 and D1"
+    - "T1 and T2 and not D1"
+    - "T1 and (T2 or D1)"
+```
+
+Important rules:
+
+- detector names must match exactly the names defined in `detectors`
+- expressions must be quoted strings in YAML
+- only boolean logic is allowed
+
+Not allowed:
+
+- comparisons such as `"T1 == T2"`
+- arithmetic such as `"T1 + T2"`
+- function calls such as `"T1()"`
+
+The engine validates expressions before running the simulation.
+
+### Writing conditional probabilities
+
+`logic.conditional` is a YAML list. Each entry asks the engine to compute a
+conditional probability of the form:
+
+```text
+P(numerator | given)
+```
+
+Each entry must contain:
+
+- `name`: label printed in the output
+- `numerator`: expression for the event in the numerator
+- `given`: expression for the conditioning event
+- `mode`: which boolean dataset to use
+
+Example:
+
+```yaml
+logic:
+  conditional:
+    - name: "P(D1 fires | T1 and T2 fire)"
+      numerator: "D1"
+      given: "T1 and T2"
+      mode: fired
+```
+
+Another valid example:
+
+```yaml
+logic:
+  conditional:
+    - name: "P(D1 crossed | T1 and T2 crossed)"
+      numerator: "D1"
+      given: "T1 and T2"
+      mode: geometric
+```
+
+Allowed `mode` values:
+
+- `fired`: use detector firing booleans
+- `geometric`: use pure geometric crossing booleans
+
+`numerator` and `given` use the same expression syntax as `logic.expressions`.
+
 ## Running the engine
 
 Run the example configuration with the script:
 
 ```bash
 python3 scripts/run_toymc.py configs/example.yaml
-```
-
-You can also run the installed console entry point:
-
-```bash
-toymc-cosmic configs/example.yaml
 ```
 
 The output prints:
@@ -130,13 +189,6 @@ The current test suite uses the standard library `unittest` runner:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
-```
-
-If you installed the dev extra and want to use `pytest`, it can discover the
-same tests:
-
-```bash
-PYTHONPATH=src pytest
 ```
 
 ## Notes
