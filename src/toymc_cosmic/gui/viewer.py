@@ -565,13 +565,77 @@ class EventDisplayController:
             reset_camera=False,
         )
 
+        window_height = float(self._plotter.window_size[1])
+        status_y = (
+            window_height
+            - STATUS_TOP_MARGIN_PX
+            - STATUS_LINE_COUNT * LEGEND_LINE_HEIGHT_PX
+        )
         self._plotter.add_text(
             _build_status_text(state, self._simulation_result.n_events),
-            position="upper_left",
-            font_size=10,
+            position=(LEGEND_LEFT_MARGIN_PX, status_y),
+            font_size=STATUS_TEXT_FONT_SIZE,
             name="viewer_status",
         )
+        self._render_legend(state, window_height, status_y)
         self._plotter.render()
+
+    def _render_legend(
+        self,
+        state: EventDisplayState,
+        window_height: float,
+        status_y: float,
+    ) -> None:
+        """Draw the boxed conditional/state legend directly below the status block.
+
+        The legend is one visually seamless box built from two layers of text
+        actors:
+
+        - a single background actor (``legend_box``) holding all six legend
+          lines as one multiline string, in black text, with a white
+          background and a thin black frame. Because it is real content
+          (not filler text), PyVista/VTK sizes the box to the actual widest
+          line, so long ``given``/``numerator`` expressions simply widen the
+          box instead of being clipped.
+        - three colored overlay actors (``legend_swatch_0/1/2``), each
+          drawn with the identical text, font size, and position as the
+          matching swatch line inside the background block, but with no
+          background/frame of their own. Because their glyphs land exactly
+          on top of the background block's glyphs, they visually replace
+          the black swatch text with the configured track color.
+        """
+        legend_lines = _build_legend_lines(state, self._gui_config)
+        legend_top_y = status_y - LEGEND_TOP_GAP_PX - LEGEND_LINE_COUNT * LEGEND_LINE_HEIGHT_PX
+
+        legend_text = "\n".join(text for text, _color in legend_lines)
+        legend_box_actor = self._plotter.add_text(
+            legend_text,
+            position=(LEGEND_LEFT_MARGIN_PX, legend_top_y),
+            font_size=LEGEND_FONT_SIZE,
+            color="black",
+            name="legend_box",
+        )
+        legend_box_actor.prop.background_color = "white"
+        legend_box_actor.prop.background_opacity = 1.0
+        legend_box_actor.prop.frame_color = "black"
+        legend_box_actor.prop.frame_width = 1
+        legend_box_actor.prop.show_frame = True
+
+        swatch_start_index = LEGEND_LINE_COUNT - 3
+        for swatch_offset in range(3):
+            line_index = swatch_start_index + swatch_offset
+            text, color = legend_lines[line_index]
+            # Text grows upward from the anchor point, so the line at
+            # `line_index` (0 = topmost) sits higher than later lines.
+            line_y = legend_top_y + LEGEND_LINE_HEIGHT_PX * (LEGEND_LINE_COUNT - 1 - line_index)
+            swatch_actor = self._plotter.add_text(
+                text,
+                position=(LEGEND_LEFT_MARGIN_PX, line_y),
+                font_size=LEGEND_FONT_SIZE,
+                color=color,
+                name=f"legend_swatch_{swatch_offset}",
+            )
+            swatch_actor.prop.show_frame = False
 
     def _build_detector_opacity_map(self, state: EventDisplayState) -> dict[str, float]:
         """Dim detectors not referenced by the active conditional."""
@@ -632,22 +696,59 @@ class EventDisplayController:
 
 
 def _build_status_text(state: EventDisplayState, total_events: int) -> str:
-    """Build the overlay text shown inside the event display."""
+    """Build the counters-only overlay text shown above the legend."""
     lines = [
         f"Relevant track: {state.relevant_event_index + 1} / {state.relevant_event_count}",
         f"Original event: {state.event_index + 1} / {total_events}",
         f"State in event: {state.step_index_within_event + 1} / {state.step_count_within_event}",
-        f"Track state: {state.state_name}",
-        state.state_description,
+        "Keys: Left/Right Prev/Next state, q exit",
     ]
-
-    if state.conditional_name is None:
-        lines.append("Conditional: none")
-    else:
-        lines.append(f"Conditional: {state.conditional_name}")
-
-    lines.append("Keys: Left/Right Prev/Next state, q exit")
     return "\n".join(lines)
+
+
+def _sanitize_for_multiline_text_actor(text: str | None) -> str | None:
+    """Replace characters that corrupt VTK's multiline text-actor layout.
+
+    A literal ``|`` character (common in this project's conditional names,
+    e.g. ``"D1|T1*T2"``) makes the installed VTK text renderer misreport
+    that line's font metrics, which throws off the vertical spacing of
+    every line below it inside the same multiline text actor. The legend
+    box is one such multiline actor, so conditional names are displayed
+    with ``|`` replaced by the word "GIVEN" -- which also happens to match
+    the conditional-probability reading of the original notation, e.g.
+    ``"D1|T1*T2"`` becomes ``"D1 GIVEN T1*T2"``.
+    """
+    if text is None:
+        return None
+    return text.replace("|", " GIVEN ")
+
+
+def _build_legend_lines(
+    state: EventDisplayState,
+    gui_config: GUIConfig,
+) -> list[tuple[str, Any | None]]:
+    """Build the fixed six-line legend content shown below the status block.
+
+    Each entry is a ``(text, color)`` pair. The three header lines carry
+    ``color=None`` because they are rendered only once, as plain black text,
+    inside the single boxed background actor. The three swatch lines carry
+    the actual configured track color for that visible state, because they
+    are additionally drawn as colored overlay actors on top of the boxed
+    background (see ``EventDisplayController._render_legend``).
+
+    All six lines are always returned, regardless of ``state.state_name``,
+    because the legend explains all three possible visible track states at
+    once -- it does not highlight only the currently active one.
+    """
+    conditional_display_name = _sanitize_for_multiline_text_actor(state.conditional_name)
+    return [
+        (f"CONDITIONAL: {conditional_display_name}", None),
+        (f"GIVEN: {state.given_expression}", None),
+        (f"NUMERATOR: {state.numerator_expression}", None),
+        ("GIVEN NO", gui_config.track_color_geometric_only),
+        ("GIVEN YES, NUMERATOR NO", gui_config.track_color_fired_given_only),
+        ("GIVEN YES, NUMERATOR YES", gui_config.track_color_fired_joint),
+    ]
 
 
 def _require_pyvista() -> Any:

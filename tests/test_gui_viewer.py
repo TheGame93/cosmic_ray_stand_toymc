@@ -18,6 +18,7 @@ from toymc_cosmic.gui.viewer import (
     BUTTON_LEFT_PADDING_PX,
     DisplayBounds,
     EventDisplayController,
+    EventDisplayState,
     EventNavigator,
     PreparedConditional,
     build_button_texture_pixels,
@@ -25,7 +26,27 @@ from toymc_cosmic.gui.viewer import (
     build_navigation_button_specs,
     clip_line_to_bounds,
     collect_relevant_event_indices,
+    _build_legend_lines,
+    _build_status_text,
 )
+
+
+def _make_event_display_state(state_name: str = "geometric-only") -> EventDisplayState:
+    """Build a minimal EventDisplayState fixture for status/legend text tests."""
+    return EventDisplayState(
+        event_index=0,
+        relevant_event_index=0,
+        relevant_event_count=2,
+        conditional_index=0,
+        step_index_within_event=0,
+        step_count_within_event=3,
+        conditional_name="D1|T1*T2",
+        given_expression="T1 and T2",
+        numerator_expression="D1",
+        involved_detector_names=frozenset({"T1", "T2", "D1"}),
+        state_name=state_name,
+        track_color="orange",
+    )
 
 
 class GuiViewerTests(unittest.TestCase):
@@ -93,6 +114,14 @@ class GuiViewerTests(unittest.TestCase):
         self.assertEqual(states[0].involved_detector_names, frozenset({"T1", "D1"}))
         self.assertEqual(states[0].relevant_event_index, 0)
         self.assertEqual(states[0].relevant_event_count, 1)
+        self.assertEqual(
+            [state.given_expression for state in states],
+            ["T1", "T1", "T1"],
+        )
+        self.assertEqual(
+            [state.numerator_expression for state in states],
+            ["D1", "D1", "D1"],
+        )
 
     def test_event_state_involved_detector_names_ignore_boolean_keywords(self) -> None:
         """Only detector names from given and numerator should be retained."""
@@ -330,6 +359,125 @@ class GuiViewerTests(unittest.TestCase):
         plotter.key_callbacks["Right"]()
         self.assertEqual(navigator.state_position(), (1, 0))
 
+        status_entries = [entry for entry in plotter.added_text if entry.get("name") == "viewer_status"]
+        self.assertTrue(status_entries)
+        latest_status_text = status_entries[-1]["text"]
+        self.assertIn("Relevant track:", latest_status_text)
+        self.assertNotIn("Track state", latest_status_text)
+        self.assertNotIn("Conditional", latest_status_text)
+
+        legend_box_entries = [entry for entry in plotter.added_text if entry.get("name") == "legend_box"]
+        self.assertTrue(legend_box_entries)
+        legend_box_text = legend_box_entries[-1]["text"]
+        self.assertIn("CONDITIONAL: C1", legend_box_text)
+        self.assertIn("GIVEN: T1 and T2", legend_box_text)
+        self.assertIn("NUMERATOR: D1", legend_box_text)
+        self.assertIn("GIVEN NO", legend_box_text)
+        self.assertIn("GIVEN YES, NUMERATOR NO", legend_box_text)
+        self.assertIn("GIVEN YES, NUMERATOR YES", legend_box_text)
+
+        expected_swatch_colors = {
+            "legend_swatch_0": self._gui_config().track_color_geometric_only,
+            "legend_swatch_1": self._gui_config().track_color_fired_given_only,
+            "legend_swatch_2": self._gui_config().track_color_fired_joint,
+        }
+        for swatch_name, expected_color in expected_swatch_colors.items():
+            swatch_entries = [entry for entry in plotter.added_text if entry.get("name") == swatch_name]
+            self.assertTrue(swatch_entries, f"missing {swatch_name}")
+            self.assertEqual(swatch_entries[-1]["color"], expected_color)
+
+    def test_event_state_carries_given_and_numerator_expressions(self) -> None:
+        """The given/numerator strings should propagate verbatim onto the state."""
+        gui_config = self._gui_config()
+        prepared_conditionals = [
+            PreparedConditional(
+                index=0,
+                name="D1|T1*T2",
+                numerator="D1",
+                given="T1 and T2",
+                geometric_given=np.array([True]),
+                fired_given=np.array([True]),
+                fired_numerator=np.array([True]),
+            )
+        ]
+
+        states = build_event_states_for_event(0, 0, 1, prepared_conditionals, gui_config)
+
+        self.assertEqual(states[0].given_expression, "T1 and T2")
+        self.assertEqual(states[0].numerator_expression, "D1")
+
+    def test_build_status_text_contains_only_counters_and_keys(self) -> None:
+        """The status block should be limited to counters and the key hint."""
+        state = _make_event_display_state()
+
+        status_text = _build_status_text(state, total_events=5)
+
+        self.assertIn("Relevant track: 1 / 2", status_text)
+        self.assertIn("Original event: 1 / 5", status_text)
+        self.assertIn("State in event: 1 / 3", status_text)
+        self.assertIn("Keys: Left/Right Prev/Next state, q exit", status_text)
+        self.assertNotIn("Track state", status_text)
+        self.assertNotIn("Conditional", status_text)
+        self.assertNotIn("Given is true", status_text)
+        self.assertNotIn("numerator is false", status_text)
+
+    def test_build_legend_lines_contains_header_and_fixed_three_states(self) -> None:
+        """The legend should always list the conditional header and all three states."""
+        gui_config = GUIConfig(
+            background_color="black",
+            default_detector_color="lightgray",
+            detector_colors={},
+            default_track_color="white",
+            track_color_geometric_only="colorA",
+            track_color_fired_given_only="colorB",
+            track_color_fired_joint="colorC",
+            line_width=4.0,
+        )
+        state = _make_event_display_state()
+
+        legend_lines = _build_legend_lines(state, gui_config)
+
+        self.assertEqual(
+            legend_lines,
+            [
+                ("CONDITIONAL: D1 GIVEN T1*T2", None),
+                ("GIVEN: T1 and T2", None),
+                ("NUMERATOR: D1", None),
+                ("GIVEN NO", "colorA"),
+                ("GIVEN YES, NUMERATOR NO", "colorB"),
+                ("GIVEN YES, NUMERATOR YES", "colorC"),
+            ],
+        )
+
+    def test_build_legend_lines_replaces_pipe_in_conditional_name(self) -> None:
+        """A literal '|' in the conditional name must not reach the legend text.
+
+        VTK's multiline text-actor layout is corrupted by a literal '|'
+        character (it throws off the vertical spacing of every subsequent
+        line in the same actor), so the legend header substitutes it with
+        the word "GIVEN" before display.
+        """
+        gui_config = self._gui_config()
+        state = _make_event_display_state()
+
+        legend_lines = _build_legend_lines(state, gui_config)
+
+        conditional_line_text = legend_lines[0][0]
+        self.assertNotIn("|", conditional_line_text)
+        self.assertEqual(conditional_line_text, "CONDITIONAL: D1 GIVEN T1*T2")
+
+    def test_build_legend_lines_shows_all_three_states_regardless_of_current_state(self) -> None:
+        """The legend content should not depend on which of the 3 states is active."""
+        gui_config = self._gui_config()
+        for state_name in ("geometric-only", "fired-given-only", "fired-joint"):
+            state = _make_event_display_state(state_name=state_name)
+            legend_lines = _build_legend_lines(state, gui_config)
+            labels = [text for text, _color in legend_lines[3:]]
+            self.assertEqual(
+                labels,
+                ["GIVEN NO", "GIVEN YES, NUMERATOR NO", "GIVEN YES, NUMERATOR YES"],
+            )
+
     def _gui_config(self) -> GUIConfig:
         """Build a compact GUI config used across viewer tests."""
         return GUIConfig(
@@ -368,6 +516,18 @@ class FakeButtonWidget:
         return self.representation
 
 
+class FakeTextProperty:
+    """Mutable stand-in for a VTK text actor's ``prop`` namespace."""
+
+
+class FakeTextActor:
+    """Minimal text actor double exposing a settable ``prop`` namespace."""
+
+    def __init__(self) -> None:
+        """Attach one fake text-property namespace."""
+        self.prop = FakeTextProperty()
+
+
 class FakePyVistaModule:
     """Small stand-in for the PyVista module used in controller tests."""
 
@@ -401,9 +561,10 @@ class FakePlotter:
         """Record mesh redraws without rendering anything."""
         self.added_meshes.append({"mesh": mesh, **kwargs})
 
-    def add_text(self, text: str, **kwargs: object) -> None:
+    def add_text(self, text: str, **kwargs: object) -> "FakeTextActor":
         """Record text overlays without rendering them."""
         self.added_text.append({"text": text, **kwargs})
+        return FakeTextActor()
 
     def render(self) -> None:
         """No-op render hook used by the controller."""
