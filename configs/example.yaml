@@ -11,20 +11,20 @@ monte_carlo:
 
 detectors:
   - name: T1
-    center: [0.0, 0.0, 20.0]
-    size: [10.0, 10.0, 1.0]
+    center: [0.0, 0.0, 13.0]
+    size: [10.0, 10.0, 0.9]
     efficiency: 0.8
   - name: T3
-    center: [0.0, 0.0, 11.0]
-    size: [ 6.0,  5.0, 1.0]
+    center: [0.0, 0.0, 7.0]
+    size: [ 6.0,  5.0, 0.9]
     efficiency: 0.8
   - name: D1
-    center: [0.0, 0.0,  9.0]
+    center: [0.0, 0.0,  6.0]
     size: [ 6.0,  5.0, 0.3]
     efficiency: 1
   - name: T2
     center: [0.0, 0.0, 0.0]
-    size: [10.0, 10.0, 1.0]
+    size: [10.0, 10.0, 0.9]
     efficiency: 0.8
 
 logic:

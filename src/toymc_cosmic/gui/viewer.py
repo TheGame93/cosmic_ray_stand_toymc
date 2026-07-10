@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Any
+from typing import Any, Callable
 
 import numpy as np
 
 from ..config import Config
 from ..geometry import Detector, generation_region
-from ..logic import evaluate
+from ..logic import evaluate, extract_names
 from ..simulation import SimulationResult
 from .config import GUIConfig, load_gui_config
-from .scene import build_plotter, render_detector_colors
+from .scene import apply_camera_position, build_plotter, build_startup_camera_position, render_detector_colors
 
 
 @dataclass(frozen=True)
@@ -40,6 +40,7 @@ class EventDisplayState:
     step_index_within_event: int
     step_count_within_event: int
     conditional_name: str | None
+    involved_detector_names: frozenset[str]
     state_name: str
     state_description: str
     track_color: Any
@@ -55,6 +56,28 @@ class DisplayBounds:
     y_max: float
     z_min: float
     z_max: float
+
+
+@dataclass(frozen=True)
+class NavigationButtonSpec:
+    """Describe one icon-only action button shown in the event display."""
+
+    name: str
+    icon_kind: str
+    position: tuple[float, float]
+
+
+BUTTON_SIZE_PX = 24
+BUTTON_GAP_PX = 10
+BUTTON_BOTTOM_MARGIN_PX = 18
+BUTTON_LEFT_PADDING_PX = 18
+AXES_FOOTPRINT_WIDTH_PX = 86
+BUTTON_BORDER_PX = 3
+BUTTON_BACKGROUND_RGB = np.array([245, 245, 245], dtype=np.uint8)
+BUTTON_BORDER_RGB = np.array([180, 180, 180], dtype=np.uint8)
+BUTTON_ICON_RGB = np.array([70, 70, 70], dtype=np.uint8)
+BUTTON_PRESSED_ICON_RGB = np.array([30, 30, 30], dtype=np.uint8)
+BUTTON_PRESSED_FILL_RGB = np.array([220, 220, 220], dtype=np.uint8)
 
 
 class EventNavigator:
@@ -105,6 +128,10 @@ class EventNavigator:
             previous_event_states = self._states_for_current_event()
             self._state_index_within_event = len(previous_event_states) - 1
         return self.current_state()
+
+    def state_position(self) -> tuple[int, int]:
+        """Return the current event/state position for tests and controller checks."""
+        return self._relevant_event_index, self._state_index_within_event
 
     def _states_for_current_event(self) -> list[EventDisplayState]:
         """Return the cached states for the currently selected relevant event."""
@@ -198,6 +225,9 @@ def build_event_states_for_event(
     event_states: list[EventDisplayState] = []
     step_count = len(relevant_conditionals)
     for step_index, conditional in enumerate(relevant_conditionals):
+        involved_detector_names = frozenset(
+            extract_names(conditional.given) | extract_names(conditional.numerator)
+        )
         if not bool(conditional.fired_given[event_index]):
             state_name = "geometric-only"
             state_description = "Given is true geometrically but false in fired mode."
@@ -220,6 +250,7 @@ def build_event_states_for_event(
                 step_index_within_event=step_index,
                 step_count_within_event=step_count,
                 conditional_name=conditional.name,
+                involved_detector_names=involved_detector_names,
                 state_name=state_name,
                 state_description=state_description,
                 track_color=track_color,
@@ -289,6 +320,146 @@ def clip_line_to_bounds(
     return origin + t_min * direction, origin + t_max * direction
 
 
+def build_navigation_button_specs() -> list[NavigationButtonSpec]:
+    """Return the fixed horizontal button row shown beside the axes widget."""
+    button_y = float(BUTTON_BOTTOM_MARGIN_PX)
+    first_button_x = float(AXES_FOOTPRINT_WIDTH_PX + BUTTON_LEFT_PADDING_PX)
+    button_stride = float(BUTTON_SIZE_PX + BUTTON_GAP_PX)
+
+    return [
+        NavigationButtonSpec("Home", "home", (first_button_x + 0.0 * button_stride, button_y)),
+        NavigationButtonSpec("Previous", "previous", (first_button_x + 1.0 * button_stride, button_y)),
+        NavigationButtonSpec("Next", "next", (first_button_x + 2.0 * button_stride, button_y)),
+    ]
+
+
+def build_button_texture_pixels(
+    icon_kind: str,
+    *,
+    is_pressed: bool,
+    size: int = BUTTON_SIZE_PX,
+) -> np.ndarray:
+    """Build one RGB texture for a button with a centered icon."""
+    if size <= 0:
+        raise ValueError("Button texture size must be positive.")
+
+    pixels = np.empty((size, size, 3), dtype=np.uint8)
+    pixels[:, :] = BUTTON_BACKGROUND_RGB
+    pixels[0, :] = BUTTON_BORDER_RGB
+    pixels[-1, :] = BUTTON_BORDER_RGB
+    pixels[:, 0] = BUTTON_BORDER_RGB
+    pixels[:, -1] = BUTTON_BORDER_RGB
+
+    fill_start = BUTTON_BORDER_PX
+    fill_stop = size - BUTTON_BORDER_PX
+    fill_color = BUTTON_PRESSED_FILL_RGB if is_pressed else BUTTON_BACKGROUND_RGB
+    pixels[fill_start:fill_stop, fill_start:fill_stop] = fill_color
+
+    icon_color = BUTTON_PRESSED_ICON_RGB if is_pressed else BUTTON_ICON_RGB
+    _draw_button_icon(pixels, icon_kind, icon_color)
+    return pixels
+
+
+def _draw_button_icon(
+    pixels: np.ndarray,
+    icon_kind: str,
+    icon_color: np.ndarray,
+) -> None:
+    """Paint one of the supported button icons into the texture array."""
+    size = pixels.shape[0]
+    if icon_kind == "home":
+        margin = max(5, size // 4)
+        pixels[margin:size - margin, margin:size - margin] = icon_color
+        return
+
+    if icon_kind not in {"previous", "next"}:
+        raise ValueError(f"Unsupported button icon kind: {icon_kind}")
+
+    next_arrow_pixels = np.zeros((size, size), dtype=bool)
+    margin = max(4, size // 6)
+    center = size // 2
+    tail_half_height = max(2, size // 10)
+    tail_start = margin
+    head_base_x = size - margin - max(6, size // 4)
+    tip_x = size - margin
+
+    next_arrow_pixels[
+        center - tail_half_height:center + tail_half_height + 1,
+        tail_start:head_base_x,
+    ] = True
+
+    head_half_height = max(5, size // 4)
+    for row_offset in range(-head_half_height, head_half_height + 1):
+        row_index = center + row_offset
+        if row_index < 0 or row_index >= size:
+            continue
+
+        head_tip_offset = int(
+            round((1.0 - abs(row_offset) / max(head_half_height, 1)) * (tip_x - head_base_x))
+        )
+        head_end = head_base_x + max(head_tip_offset, 1)
+        next_arrow_pixels[row_index, head_base_x:head_end] = True
+
+    arrow_pixels = next_arrow_pixels
+    if icon_kind == "previous":
+        arrow_pixels = np.flip(next_arrow_pixels, axis=1)
+
+    pixels[arrow_pixels] = icon_color
+
+
+def create_button_image_data(pv: Any, pixels: np.ndarray) -> Any:
+    """Convert a texture RGB array into the image object expected by VTK buttons."""
+    size = int(pixels.shape[0])
+    image_data = pv.ImageData(dimensions=(size, size, 1))
+    image_data.point_data["texture"] = pixels.reshape(size * size, 3).astype(np.uint8)
+    return image_data
+
+
+def create_textured_button_widget(
+    plotter: Any,
+    pv: Any,
+    *,
+    label: str,
+    position: tuple[float, float],
+    size: int,
+    texture_off: np.ndarray,
+    texture_on: np.ndarray,
+    callback: Callable[[bool], None],
+) -> Any:
+    """Create one low-level textured VTK button widget."""
+    vtk = pv._vtk
+
+    button_representation = vtk.vtkTexturedButtonRepresentation2D()
+    button_representation.SetNumberOfStates(2)
+    button_representation.SetState(0)
+    button_representation.SetButtonTexture(0, create_button_image_data(pv, texture_off))
+    button_representation.SetButtonTexture(1, create_button_image_data(pv, texture_on))
+    button_representation.SetPlaceFactor(1)
+    button_representation.PlaceWidget(
+        [
+            position[0],
+            position[0] + size,
+            position[1],
+            position[1] + size,
+            0.0,
+            0.0,
+        ]
+    )
+
+    button_widget = vtk.vtkButtonWidget()
+    button_widget.SetInteractor(plotter.iren.interactor)
+    button_widget.SetRepresentation(button_representation)
+    button_widget.SetCurrentRenderer(plotter.renderer)
+    button_widget.On()
+
+    def handle_state_change(widget: Any, _event: Any) -> None:
+        state = bool(widget.GetRepresentation().GetState())
+        callback(state)
+
+    button_widget.AddObserver(vtk.vtkCommand.StateChangedEvent, handle_state_change)
+    return button_widget
+
+
 class EventDisplayController:
     """Own the PyVista scene and update it as the user steps through events."""
 
@@ -307,6 +478,17 @@ class EventDisplayController:
         self._navigator = navigator
         self._display_bounds = display_bounds
         self._plotter = build_plotter(config.detectors, gui_config)
+        self._initial_camera_position = build_startup_camera_position(
+            (
+                display_bounds.x_min,
+                display_bounds.x_max,
+                display_bounds.y_min,
+                display_bounds.y_max,
+                display_bounds.z_min,
+                display_bounds.z_max,
+            )
+        )
+        self._button_widgets: list[Any] = []
 
     def show(self) -> None:
         """Register callbacks, draw the first state, and open the window."""
@@ -315,6 +497,8 @@ class EventDisplayController:
         self._plotter.add_key_event("q", self._close)
         self._plotter.add_key_event("Escape", self._close)
         self._render_current_state()
+        apply_camera_position(self._plotter, self._initial_camera_position)
+        self._add_navigation_buttons()
         self._plotter.show()
 
     def _show_next_state(self) -> None:
@@ -331,6 +515,11 @@ class EventDisplayController:
         """Close the PyVista window."""
         self._plotter.close()
 
+    def _reset_view(self) -> None:
+        """Restore the initial camera without changing event navigation state."""
+        apply_camera_position(self._plotter, self._initial_camera_position)
+        self._plotter.render()
+
     def _render_current_state(self) -> None:
         """Redraw detectors, track, and status text for the current state."""
         pv = _require_pyvista()
@@ -346,11 +535,13 @@ class EventDisplayController:
             elif crossed:
                 detector_event_colors[detector.name] = "red"
 
+        detector_event_opacities = self._build_detector_opacity_map(state)
         render_detector_colors(
             self._plotter,
             self._simulation_result.detectors,
             self._gui_config,
             detector_event_colors,
+            detector_event_opacities,
         )
 
         origin = self._simulation_result.tracks.origins[event_index]
@@ -373,6 +564,63 @@ class EventDisplayController:
         )
         self._plotter.render()
 
+    def _build_detector_opacity_map(self, state: EventDisplayState) -> dict[str, float]:
+        """Dim detectors not referenced by the active conditional."""
+        detector_opacities: dict[str, float] = {}
+        for detector in self._simulation_result.detectors:
+            if detector.name in state.involved_detector_names:
+                detector_opacities[detector.name] = 0.35
+            else:
+                detector_opacities[detector.name] = 0.05
+        return detector_opacities
+
+    def _add_navigation_buttons(self) -> None:
+        """Add one horizontal row of icon-only action buttons beside the axes widget."""
+        action_map: dict[str, Callable[[], None]] = {
+            "Home": self._reset_view,
+            "Previous": self._show_previous_state,
+            "Next": self._show_next_state,
+        }
+
+        for button_spec in build_navigation_button_specs():
+            action = action_map[button_spec.name]
+            self._add_action_button(button_spec, action)
+
+    def _add_action_button(
+        self,
+        button_spec: NavigationButtonSpec,
+        action: Callable[[], None],
+    ) -> None:
+        """Create one textured action button and keep its widget alive."""
+        pv = _require_pyvista()
+        widget_holder: dict[str, Any] = {}
+
+        def callback(is_checked: bool) -> None:
+            if not is_checked:
+                return
+
+            action()
+
+            # These widgets are checkbox-style in the installed PyVista version.
+            # Reset them immediately so they behave like stateless action buttons.
+            widget = widget_holder.get("widget")
+            if widget is not None:
+                widget.GetRepresentation().SetState(0)
+
+        texture_off = build_button_texture_pixels(button_spec.icon_kind, is_pressed=False)
+        texture_on = build_button_texture_pixels(button_spec.icon_kind, is_pressed=True)
+        widget_holder["widget"] = create_textured_button_widget(
+            self._plotter,
+            pv,
+            label=button_spec.name,
+            position=button_spec.position,
+            size=BUTTON_SIZE_PX,
+            texture_off=texture_off,
+            texture_on=texture_on,
+            callback=callback,
+        )
+        self._button_widgets.append(widget_holder["widget"])
+
 
 def _build_status_text(state: EventDisplayState, total_events: int) -> str:
     """Build the overlay text shown inside the event display."""
@@ -389,7 +637,7 @@ def _build_status_text(state: EventDisplayState, total_events: int) -> str:
     else:
         lines.append(f"Conditional: {state.conditional_name}")
 
-    lines.append("Keys: Left/Right step, q quits")
+    lines.append("Keys: Left/Right Prev/Next state, q exit")
     return "\n".join(lines)
 
 
