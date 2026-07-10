@@ -307,7 +307,10 @@ class GuiViewerTests(unittest.TestCase):
             [plotter.button_positions[name] for name in ["Home", "Previous", "Next"]],
             [spec.position for spec in build_navigation_button_specs()],
         )
-        expected_camera = build_startup_camera_position((-1.0, 1.0, -1.0, 1.0, 0.0, 12.0))
+        expected_camera = build_startup_camera_position(
+            (-1.0, 1.0, -1.0, 1.0, 5.5, 10.5),
+            viewport_aspect_ratio=1600.0 / 900.0,
+        )
         self.assertEqual(plotter.camera_position, expected_camera)
         self.assertEqual(plotter.reset_camera_clipping_range_calls, 1)
 
@@ -388,6 +391,7 @@ class FakePlotter:
         self.iren = mock.Mock(interactor=object())
         self.renderer = object()
         self.reset_camera_clipping_range_calls = 0
+        self.window_size = (1600, 900)
 
     def add_key_event(self, key: str, callback: object) -> None:
         """Record a keyboard callback registration."""

@@ -10,10 +10,12 @@ import numpy as np
 from toymc_cosmic.geometry import Detector
 from toymc_cosmic.gui.config import GUIConfig
 from toymc_cosmic.gui.scene import (
+    DEFAULT_VIEWPORT_ASPECT_RATIO,
     STARTUP_VIEW_DIRECTION,
     STARTUP_VIEW_UP,
     apply_camera_position,
     build_startup_camera_position,
+    plotter_viewport_aspect_ratio,
     render_detector_colors,
     show_geometry_only,
 )
@@ -35,6 +37,22 @@ class GuiSceneTests(unittest.TestCase):
         self.assertTrue(np.allclose(unit_direction, expected_direction))
         self.assertEqual(view_up, STARTUP_VIEW_UP)
 
+    def test_build_startup_camera_position_zoom_depends_on_detector_bounds_not_large_generation_area(self) -> None:
+        """A tighter detector box should produce a much closer camera than a huge framing box."""
+        tight_camera = build_startup_camera_position(
+            (-1.0, 1.0, -1.0, 1.0, 9.5, 10.5),
+            viewport_aspect_ratio=4.0 / 3.0,
+        )
+        wide_camera = build_startup_camera_position(
+            (-40.0, 40.0, -40.0, 40.0, 0.0, 20.0),
+            viewport_aspect_ratio=4.0 / 3.0,
+        )
+
+        tight_distance = np.linalg.norm(np.array(tight_camera[0]) - np.array(tight_camera[1]))
+        wide_distance = np.linalg.norm(np.array(wide_camera[0]) - np.array(wide_camera[1]))
+
+        self.assertLess(tight_distance, wide_distance / 5.0)
+
     def test_apply_camera_position_updates_clipping_range(self) -> None:
         """Applying a fixed camera should not ask PyVista to choose a new view."""
         plotter = FakePlotter()
@@ -44,6 +62,15 @@ class GuiSceneTests(unittest.TestCase):
 
         self.assertEqual(plotter.camera_position, camera_position)
         self.assertEqual(plotter.reset_camera_clipping_range_calls, 1)
+
+    def test_plotter_viewport_aspect_ratio_uses_window_size_or_default(self) -> None:
+        """Viewport aspect should prefer the plotter window size but stay deterministic."""
+        explicit_ratio_plotter = mock.Mock(window_size=(1600, 900))
+        fallback_ratio_plotter = mock.Mock()
+        del fallback_ratio_plotter.window_size
+
+        self.assertAlmostEqual(plotter_viewport_aspect_ratio(explicit_ratio_plotter), 1600.0 / 900.0)
+        self.assertEqual(plotter_viewport_aspect_ratio(fallback_ratio_plotter), DEFAULT_VIEWPORT_ASPECT_RATIO)
 
     @mock.patch("toymc_cosmic.gui.scene._require_pyvista")
     def test_render_detector_colors_applies_color_and_opacity_overrides(
@@ -144,6 +171,7 @@ class FakePlotter:
         self.camera_position: object | None = None
         self.reset_camera_clipping_range_calls = 0
         self.show_calls = 0
+        self.window_size = (1600, 900)
 
     def add_mesh(self, mesh: object, **kwargs: object) -> None:
         """Store mesh metadata without trying to render it."""

@@ -13,7 +13,14 @@ from ..geometry import Detector, generation_region
 from ..logic import evaluate, extract_names
 from ..simulation import SimulationResult
 from .config import GUIConfig, load_gui_config
-from .scene import apply_camera_position, build_plotter, build_startup_camera_position, render_detector_colors
+from .scene import (
+    apply_camera_position,
+    build_plotter,
+    build_startup_camera_position,
+    detector_scene_bounds,
+    plotter_viewport_aspect_ratio,
+    render_detector_colors,
+)
 
 
 @dataclass(frozen=True)
@@ -40,9 +47,10 @@ class EventDisplayState:
     step_index_within_event: int
     step_count_within_event: int
     conditional_name: str | None
+    given_expression: str | None
+    numerator_expression: str | None
     involved_detector_names: frozenset[str]
     state_name: str
-    state_description: str
     track_color: Any
 
 
@@ -78,6 +86,15 @@ BUTTON_BORDER_RGB = np.array([180, 180, 180], dtype=np.uint8)
 BUTTON_ICON_RGB = np.array([70, 70, 70], dtype=np.uint8)
 BUTTON_PRESSED_ICON_RGB = np.array([30, 30, 30], dtype=np.uint8)
 BUTTON_PRESSED_FILL_RGB = np.array([220, 220, 220], dtype=np.uint8)
+
+STATUS_TEXT_FONT_SIZE = 10
+STATUS_LINE_COUNT = 4
+LEGEND_FONT_SIZE = 10
+LEGEND_LINE_COUNT = 6
+LEGEND_LINE_HEIGHT_PX = 20
+LEGEND_LEFT_MARGIN_PX = 10
+LEGEND_TOP_GAP_PX = 12
+STATUS_TOP_MARGIN_PX = 10
 
 
 class EventNavigator:
@@ -230,15 +247,12 @@ def build_event_states_for_event(
         )
         if not bool(conditional.fired_given[event_index]):
             state_name = "geometric-only"
-            state_description = "Given is true geometrically but false in fired mode."
             track_color = gui_config.track_color_geometric_only
         elif not bool(conditional.fired_numerator[event_index]):
             state_name = "fired-given-only"
-            state_description = "Given is true in fired mode but numerator is false."
             track_color = gui_config.track_color_fired_given_only
         else:
             state_name = "fired-joint"
-            state_description = "Given and numerator are both true in fired mode."
             track_color = gui_config.track_color_fired_joint
 
         event_states.append(
@@ -250,9 +264,10 @@ def build_event_states_for_event(
                 step_index_within_event=step_index,
                 step_count_within_event=step_count,
                 conditional_name=conditional.name,
+                given_expression=conditional.given,
+                numerator_expression=conditional.numerator,
                 involved_detector_names=involved_detector_names,
                 state_name=state_name,
-                state_description=state_description,
                 track_color=track_color,
             )
         )
@@ -479,14 +494,8 @@ class EventDisplayController:
         self._display_bounds = display_bounds
         self._plotter = build_plotter(config.detectors, gui_config)
         self._initial_camera_position = build_startup_camera_position(
-            (
-                display_bounds.x_min,
-                display_bounds.x_max,
-                display_bounds.y_min,
-                display_bounds.y_max,
-                display_bounds.z_min,
-                display_bounds.z_max,
-            )
+            detector_scene_bounds(config.detectors),
+            viewport_aspect_ratio=plotter_viewport_aspect_ratio(self._plotter),
         )
         self._button_widgets: list[Any] = []
 
