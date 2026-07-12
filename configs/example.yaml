@@ -58,7 +58,7 @@ gui:
     D1: gray
     T2: black
   default_track_color: black
-  track_color_geometric_only: orange      # given true geometrically, but false in fired mode
+  track_color_geometric_only: black      # given true geometrically, but false in fired mode
   track_color_fired_given_only: red       # given true in fired mode, numerator false
   track_color_fired_joint: green          # given true in fired mode, numerator true
   line_width: 4.0
