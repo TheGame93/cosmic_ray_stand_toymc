@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/status-active-brightgreen" alt="Active status">
 </p>
 
-<table align="center" style="width:600px; max-width:100%;">
+<table align="center">
   <tr>
     <td align="center">
       <strong>Toy Monte Carlo for cosmic-ray stands</strong><br>
@@ -20,8 +20,8 @@
 <p align="center">
   <img src="docs/images/track_good.png" width="600" alt="Cosmic-ray track crossing the detector stand">
   <br>
-  <em>A cosmic-ray track crossing two 10×10 cm² trigger scintillators (T1, T2) and firing the
-  6×5 cm² D1 detector. The central 6×5 cm² T3 scintillator (grey) sits in the geometry but is
+  <em>A cosmic-ray track crossing two 10×10 cm² trigger scintillators (T1, T2)<br>and firing the
+  6×5 cm² D1 detector. The central 6×5 cm² T3 scintillator (grey, transparent)<br>sits in the geometry but is
   not used by this particular logic configuration.</em>
 </p>
 
@@ -154,7 +154,7 @@ This runs the simulation once and then shows only relevant tracks.
 - if no relevant tracks are found, event-display mode exits with a clear
   message
 
-<table align="center" style="width:600px; max-width:100%;">
+<table align="center" width="600">
   <tr>
     <td align="center" width="33%"><img src="docs/images/track_good.png" width="100%" alt="Given and numerator both true"></td>
     <td align="center" width="33%"><img src="docs/images/track_bad.png" width="100%" alt="Given true, numerator false"></td>
@@ -192,7 +192,7 @@ The engine is configured through YAML.
 
 ```yaml
 seed: 123456
-theta_max_deg: 80
+theta_max_deg: 70
 
 angular_model:
   type: cos2
@@ -204,20 +204,20 @@ monte_carlo:
 
 detectors:
   - name: T1
-    center: [0.0, 0.0, 20.0]
-    size: [10.0, 10.0, 1.0]
+    center: [0.0, 0.0, 13.0]
+    size: [10.0, 10.0, 0.9]
     efficiency: 0.8
   - name: T3
-    center: [0.0, 0.0, 11.0]
-    size: [6.0, 5.0, 1.0]
+    center: [0.0, 0.0, 7.0]
+    size: [ 6.0,  5.0, 0.9]
     efficiency: 0.8
   - name: D1
-    center: [0.0, 0.0, 9.0]
-    size: [6.0, 5.0, 0.3]
+    center: [0.0, 0.0,  6.0]
+    size: [ 6.0,  5.0, 0.3]
     efficiency: 1
   - name: T2
     center: [0.0, 0.0, 0.0]
-    size: [10.0, 10.0, 1.0]
+    size: [10.0, 10.0, 0.9]
     efficiency: 0.8
 
 logic:
@@ -251,9 +251,9 @@ gui:
     D1: gray
     T2: black
   default_track_color: black
-  track_color_geometric_only: orange
-  track_color_fired_given_only: red
-  track_color_fired_joint: green
+  track_color_geometric_only: black      # given true geometrically, but false in fired mode
+  track_color_fired_given_only: red       # given true in fired mode, numerator false
+  track_color_fired_joint: green          # given true in fired mode, numerator true
   line_width: 4.0
 ```
 
