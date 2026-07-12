@@ -60,8 +60,20 @@ src/toymc_cosmic/gui/
 ├── __init__.py
 ├── config.py
 ├── scene.py
+├── layout.py
+├── event_state.py
+├── track_bounds.py
+├── buttons.py
+├── legend.py
 └── viewer.py
 ```
+
+The event-display GUI was later split by logic across `layout.py`,
+`event_state.py`, `track_bounds.py`, `buttons.py`, and `legend.py` once
+`viewer.py` grew past 800 lines; see the "Module responsibilities" section
+below for what each one owns. `viewer.py` remains the PyVista-facing
+orchestrator (`show_event_display` and `EventDisplayController`) and the
+only new-module boundary that still imports PyVista.
 
 GUI dependency policy:
 
@@ -275,17 +287,59 @@ The implementation should reuse the current `load_config(...)` and
 - apply background and base detector colors
 - expose a reusable scene-construction function for both static and event views
 
+### `gui/layout.py`
+
+- single source of truth for on-screen position/size constants: button
+  sizing, the top-left legend box, and the bottom-left stack of
+  `[axes triad]` above `[button row]` above `[key-hint text]`
+- constants only, no functions and no PyVista, so it stays cheap to load
+  on its own
+- the bottom-stack constants are deliberately coupled to each other (kept
+  in one place rather than split across files) so they cannot silently
+  drift out of sync and reintroduce overlap
+
+### `gui/event_state.py`
+
+- manage the event-display state (`EventDisplayState`, `PreparedConditional`)
+- manage the nested `(event_index, conditional_index_within_event)`
+  navigation (`EventNavigator`)
+- precompute per-event/conditional boolean arrays and relevant-event
+  selection
+- pure Python/NumPy bookkeeping -- no PyVista
+
+### `gui/track_bounds.py`
+
+- compute the finite display box from detector geometry
+- clip an event's infinite track line into a finite segment for rendering
+- pure geometry math -- no PyVista
+
+### `gui/buttons.py`
+
+- build the Home/Previous/Next button layout, icon textures, and the raw
+  VTK button widgets
+- generic and self-contained: takes `pv`/`plotter` objects as parameters
+  rather than importing PyVista itself
+
+### `gui/legend.py`
+
+- build the legend's plain-text lines and the dynamic
+  "Given .../ Numerator ..." sentence from one `EventDisplayState`
+- pure string building -- no PyVista
+
 ### `gui/viewer.py`
 
-- manage the event-display state
-- manage the nested `(event_index, conditional_index_within_event)` navigation
+- orchestrate the pieces above into `show_event_display` and
+  `EventDisplayController`
 - update the current track actor
 - update the track color for the current conditional state
 - update detector colors based on engine crossing/firing booleans
 - wire keyboard stepping callbacks
-- keep all per-event rendering logic in one place
+- own the PyVista scene and keep all per-event *rendering* calls
+  (`add_mesh`/`add_text`/button widgets) in one place, even though the
+  logic that decides *what* to render now lives in the sibling modules
+  above
 
-No engine physics logic belongs in either module.
+No engine physics logic belongs in any of these modules.
 
 Lazy imports and missing-dependency error handling must also be commented
 clearly so the boundary between engine and GUI remains easy to follow.
