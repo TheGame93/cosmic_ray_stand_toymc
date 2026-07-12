@@ -19,7 +19,7 @@
 
 > [!IMPORTANT]
 > The current engine is intentionally geometric and simple.
-> It does not simulate energy loss, material interactions, multiple scattering, timing, or secondaries.
+> It does not simulate energy loss, material interactions, multiple scattering, secondaries, pileup or timing requirements. It's not GEANT4.
 
 > [!NOTE]
 > **AI disclaimer**
@@ -32,9 +32,9 @@
 Clone or copy the repository, then run one of these:
 
 ```bash
-./run_toymc.sh configs/example.yaml                       # headless rates and probabilities
-./run_toymc.sh configs/example.yaml --gui --geometry-only # detector geometry only
-./run_toymc.sh configs/example.yaml --gui --event-display # relevant tracks only
+./run_toymc.sh configs/example.yaml                       # only terminal output
+./run_toymc.sh configs/example.yaml --gui --geometry-only # view detector geometry
+./run_toymc.sh configs/example.yaml --gui --event-display # view particle tracks
 ```
 
 ## Table of Contents
@@ -253,7 +253,7 @@ Each detector entry must contain:
 ## Logic and Conditionals
 
 <details>
-<summary><strong>Trimmed logic reference</strong></summary>
+<summary><strong>How to setup the trigger and detector logic </strong></summary>
 
 Allowed expression syntax:
 

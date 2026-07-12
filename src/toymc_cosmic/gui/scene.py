@@ -17,6 +17,8 @@ STARTUP_VIEW_UP = (0.0, 0.0, 1.0)
 MIN_CAMERA_DISTANCE = 5.0
 CAMERA_FRAME_PADDING = 1.08
 DEFAULT_VIEWPORT_ASPECT_RATIO = 4.0 / 3.0
+DEFAULT_WINDOW_HEIGHT_PX = 900.0
+DEFAULT_WINDOW_WIDTH_PX = 1600.0
 
 
 def show_geometry_only(config: Config) -> None:
@@ -31,15 +33,131 @@ def show_geometry_only(config: Config) -> None:
     plotter.show()
 
 
-def build_plotter(detectors: list[Detector], gui_config: GUIConfig) -> Any:
-    """Create a PyVista plotter populated with detector meshes."""
+def build_plotter(
+    detectors: list[Detector],
+    gui_config: GUIConfig,
+    *,
+    reserve_bottom_px: float = 0.0,
+    shift_axes_right_px: float = 0.0,
+) -> Any:
+    """Create a PyVista plotter populated with detector meshes.
+
+    `reserve_bottom_px` optionally shifts the default bottom-left axes
+    triad upward by that many pixels, freeing deterministic room beneath
+    it for the event display's stacked button row and key-hint text (see
+    `EventDisplayController.__init__` in `viewer.py`). `shift_axes_right_px`
+    optionally nudges the triad sideways by that many pixels (negative
+    moves it left). `show_geometry_only` always uses the defaults `0.0`,
+    which reproduce today's unshifted axes exactly -- that mode has no
+    buttons or overlay text competing for that corner.
+    """
     pv = _require_pyvista()
 
     plotter = pv.Plotter()
     plotter.set_background(gui_config.background_color)
-    plotter.add_axes()
+
+    if reserve_bottom_px > 0.0 or shift_axes_right_px != 0.0:
+        # Only recompute the viewport when a caller actually needs it
+        # shifted, so geometry-only mode keeps calling `add_axes()` with
+        # no arguments, exactly as before, rather than an
+        # equivalent-but-different explicit `viewport=` kwarg.
+        window_height_px = plotter_window_height_px(plotter)
+        window_width_px = plotter_window_width_px(plotter)
+        plotter.add_axes(
+            viewport=compute_axes_viewport(
+                reserve_bottom_px,
+                window_height_px,
+                shift_right_px=shift_axes_right_px,
+                window_width_px=window_width_px,
+            )
+        )
+    else:
+        plotter.add_axes()
+
     render_detector_colors(plotter, detectors, gui_config, {})
     return plotter
+
+
+def compute_axes_viewport(
+    reserve_bottom_px: float,
+    window_height_px: float,
+    *,
+    shift_right_px: float = 0.0,
+    window_width_px: float = 1.0,
+) -> tuple[float, float, float, float]:
+    """Return the (xstart, ystart, xend, yend) axes viewport, shifted from PyVista's default.
+
+    PyVista's default axes viewport is the bottom-left `(0, 0, 0.2, 0.2)`
+    square of the render window, expressed in normalized (0 to 1)
+    coordinates with the same bottom-left origin VTK uses everywhere in
+    this project -- see also the button widgets' `PlaceWidget` calls in
+    `viewer.py`, which use that same origin convention but in absolute
+    pixel ("display") coordinates instead of normalized fractions.
+
+    We keep the triad's 0.2 x 0.2 size unchanged and only shift its
+    position, converting each requested pixel budget into a fraction of
+    the *matching* window dimension (vertical shift as a fraction of
+    height, horizontal shift as a fraction of width) at the moment this
+    runs (right after `pv.Plotter()` construction, before `.show()`).
+    `window_width_px` is only actually used when `shift_right_px` is
+    non-zero, so its harmless default of `1.0` never causes a division
+    error for the common vertical-only case.
+
+    This is only exact at that one window size: if the user resizes the
+    window afterward, this normalized-fraction axes triad rescales with
+    the new window dimensions while the pixel-positioned button row and
+    key-hint text do not, so on an unusually small resized window the two
+    could end up overlapping. This mirrors a pre-existing limitation
+    already accepted in this file (the axes triad's on-screen footprint
+    was always only an approximation at one assumed window size) and is
+    not fixed here.
+    """
+    if reserve_bottom_px < 0.0:
+        raise ValueError("reserve_bottom_px must not be negative.")
+    if window_height_px <= 0.0:
+        raise ValueError("window_height_px must be positive to compute the axes viewport.")
+    if shift_right_px != 0.0 and window_width_px <= 0.0:
+        raise ValueError("window_width_px must be positive to shift the axes viewport horizontally.")
+
+    bottom_fraction = reserve_bottom_px / window_height_px
+    left_fraction = shift_right_px / window_width_px
+    return (left_fraction, bottom_fraction, left_fraction + 0.2, bottom_fraction + 0.2)
+
+
+def plotter_window_height_px(plotter: Any) -> float:
+    """Return the plotter's current window height in pixels, or a safe fallback.
+
+    Mirrors the defensive handling in `plotter_viewport_aspect_ratio` below:
+    some PyVista/VTK backends may not expose a valid `window_size`
+    immediately after construction. Falling back to
+    `DEFAULT_WINDOW_HEIGHT_PX` keeps axes placement deterministic instead
+    of raising here.
+    """
+    if hasattr(plotter, "window_size"):
+        raw_window_size = plotter.window_size
+        if (
+            isinstance(raw_window_size, (tuple, list))
+            and len(raw_window_size) == 2
+            and float(raw_window_size[1]) > 0.0
+        ):
+            return float(raw_window_size[1])
+    return DEFAULT_WINDOW_HEIGHT_PX
+
+
+def plotter_window_width_px(plotter: Any) -> float:
+    """Return the plotter's current window width in pixels, or a safe fallback.
+
+    Mirrors `plotter_window_height_px` above, for the horizontal axes shift.
+    """
+    if hasattr(plotter, "window_size"):
+        raw_window_size = plotter.window_size
+        if (
+            isinstance(raw_window_size, (tuple, list))
+            and len(raw_window_size) == 2
+            and float(raw_window_size[0]) > 0.0
+        ):
+            return float(raw_window_size[0])
+    return DEFAULT_WINDOW_WIDTH_PX
 
 
 def render_detector_colors(

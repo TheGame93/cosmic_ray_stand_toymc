@@ -38,7 +38,14 @@ class PreparedConditional:
 
 @dataclass(frozen=True)
 class EventDisplayState:
-    """One viewer state for one event and one relevant conditional."""
+    """One viewer state for one event and one relevant conditional.
+
+    `conditional_name` and `conditional_index` are kept for structural
+    completeness (they identify which configured conditional this state
+    belongs to) but are no longer rendered anywhere -- the legend dropped
+    the "CONDITIONAL: <name>" line in favor of showing the raw
+    `given`/`numerator` expressions directly.
+    """
 
     event_index: int
     relevant_event_index: int
@@ -49,6 +56,8 @@ class EventDisplayState:
     conditional_name: str | None
     given_expression: str | None
     numerator_expression: str | None
+    given_fired: bool
+    numerator_fired: bool
     involved_detector_names: frozenset[str]
     state_name: str
     track_color: Any
@@ -77,9 +86,7 @@ class NavigationButtonSpec:
 
 BUTTON_SIZE_PX = 24
 BUTTON_GAP_PX = 10
-BUTTON_BOTTOM_MARGIN_PX = 18
 BUTTON_LEFT_PADDING_PX = 18
-AXES_FOOTPRINT_WIDTH_PX = 86
 BUTTON_BORDER_PX = 3
 BUTTON_BACKGROUND_RGB = np.array([245, 245, 245], dtype=np.uint8)
 BUTTON_BORDER_RGB = np.array([180, 180, 180], dtype=np.uint8)
@@ -87,14 +94,25 @@ BUTTON_ICON_RGB = np.array([70, 70, 70], dtype=np.uint8)
 BUTTON_PRESSED_ICON_RGB = np.array([30, 30, 30], dtype=np.uint8)
 BUTTON_PRESSED_FILL_RGB = np.array([220, 220, 220], dtype=np.uint8)
 
-STATUS_TEXT_FONT_SIZE = 10
-STATUS_LINE_COUNT = 4
 LEGEND_FONT_SIZE = 10
-LEGEND_LINE_COUNT = 6
+LEGEND_LINE_COUNT = 8
 LEGEND_LINE_HEIGHT_PX = 20
 LEGEND_LEFT_MARGIN_PX = 10
-LEGEND_TOP_GAP_PX = 12
-STATUS_TOP_MARGIN_PX = 10
+LEGEND_TOP_MARGIN_PX = 10
+
+# Bottom-left corner layout: a vertical stack of [axes triad] above
+# [button row] above [key-hint text], all left-aligned. Each constant
+# below feeds directly into the next, so the rows can never overlap by
+# construction -- editing one without the others would silently
+# reintroduce overlap, so keep this block together.
+STACK_BOTTOM_MARGIN_PX = 12  # window bottom edge -> key-hint text baseline
+STACK_ROW_GAP_PX = 10  # vertical breathing room between each stacked row
+NAV_HELP_TEXT = "Keys: Left/Right for Previous/Next state, q exit"
+BUTTON_ROW_Y_PX = float(STACK_BOTTOM_MARGIN_PX + LEGEND_LINE_HEIGHT_PX + STACK_ROW_GAP_PX)
+AXES_EXTRA_LIFT_PX = -50.0  # lower the axes triad
+AXES_HORIZONTAL_SHIFT_PX = -90.0  # positive nudges the axes triad right, negative left
+BOTTOM_STACK_RESERVE_PX = float(BUTTON_ROW_Y_PX + BUTTON_SIZE_PX + STACK_ROW_GAP_PX + AXES_EXTRA_LIFT_PX)
+
 
 
 class EventNavigator:
@@ -245,10 +263,19 @@ def build_event_states_for_event(
         involved_detector_names = frozenset(
             extract_names(conditional.given) | extract_names(conditional.numerator)
         )
-        if not bool(conditional.fired_given[event_index]):
+        # Read both booleans as named locals -- not just to branch into
+        # `state_name`/`track_color` below, but also to surface them
+        # verbatim on `EventDisplayState` for the legend text. In
+        # particular `numerator_fired` is evaluated independently of
+        # `given_fired` in `prepare_conditionals`, so it already has a
+        # well-defined value even when `given_fired` is False; the legend
+        # displays that real value rather than an "N/A" placeholder.
+        given_fired = bool(conditional.fired_given[event_index])
+        numerator_fired = bool(conditional.fired_numerator[event_index])
+        if not given_fired:
             state_name = "geometric-only"
             track_color = gui_config.track_color_geometric_only
-        elif not bool(conditional.fired_numerator[event_index]):
+        elif not numerator_fired:
             state_name = "fired-given-only"
             track_color = gui_config.track_color_fired_given_only
         else:
@@ -266,6 +293,8 @@ def build_event_states_for_event(
                 conditional_name=conditional.name,
                 given_expression=conditional.given,
                 numerator_expression=conditional.numerator,
+                given_fired=given_fired,
+                numerator_fired=numerator_fired,
                 involved_detector_names=involved_detector_names,
                 state_name=state_name,
                 track_color=track_color,
@@ -336,9 +365,9 @@ def clip_line_to_bounds(
 
 
 def build_navigation_button_specs() -> list[NavigationButtonSpec]:
-    """Return the fixed horizontal button row shown beside the axes widget."""
-    button_y = float(BUTTON_BOTTOM_MARGIN_PX)
-    first_button_x = float(AXES_FOOTPRINT_WIDTH_PX + BUTTON_LEFT_PADDING_PX)
+    """Return the fixed horizontal button row, left-aligned directly under the axes triad."""
+    button_y = BUTTON_ROW_Y_PX
+    first_button_x = float(BUTTON_LEFT_PADDING_PX)
     button_stride = float(BUTTON_SIZE_PX + BUTTON_GAP_PX)
 
     return [
@@ -492,7 +521,12 @@ class EventDisplayController:
         self._gui_config = gui_config
         self._navigator = navigator
         self._display_bounds = display_bounds
-        self._plotter = build_plotter(config.detectors, gui_config)
+        self._plotter = build_plotter(
+            config.detectors,
+            gui_config,
+            reserve_bottom_px=BOTTOM_STACK_RESERVE_PX,
+            shift_axes_right_px=AXES_HORIZONTAL_SHIFT_PX,
+        )
         self._initial_camera_position = build_startup_camera_position(
             detector_scene_bounds(config.detectors),
             viewport_aspect_ratio=plotter_viewport_aspect_ratio(self._plotter),
@@ -508,6 +542,7 @@ class EventDisplayController:
         self._render_current_state()
         apply_camera_position(self._plotter, self._initial_camera_position)
         self._add_navigation_buttons()
+        self._add_nav_help_text()
         self._plotter.show()
 
     def _show_next_state(self) -> None:
@@ -566,53 +601,61 @@ class EventDisplayController:
         )
 
         window_height = float(self._plotter.window_size[1])
-        status_y = (
+        legend_top_y = (
             window_height
-            - STATUS_TOP_MARGIN_PX
-            - STATUS_LINE_COUNT * LEGEND_LINE_HEIGHT_PX
+            - LEGEND_TOP_MARGIN_PX
+            - LEGEND_LINE_COUNT * LEGEND_LINE_HEIGHT_PX
         )
-        self._plotter.add_text(
-            _build_status_text(state, self._simulation_result.n_events),
-            position=(LEGEND_LEFT_MARGIN_PX, status_y),
-            font_size=STATUS_TEXT_FONT_SIZE,
-            name="viewer_status",
-        )
-        self._render_legend(state, window_height, status_y)
+        self._render_legend(state, legend_top_y)
         self._plotter.render()
 
-    def _render_legend(
-        self,
-        state: EventDisplayState,
-        window_height: float,
-        status_y: float,
-    ) -> None:
-        """Draw the boxed conditional/state legend directly below the status block.
+    def _render_legend(self, state: EventDisplayState, legend_top_y: float) -> None:
+        """Draw the merged status/legend block as one framed box plus one colored sentence.
 
-        The legend is one visually seamless box built from two layers of text
-        actors:
+        This is one visually seamless box built from three layers of text
+        actors, all sharing the same anchor position:
 
-        - a single background actor (``legend_box``) holding all six legend
-          lines as one multiline string, in black text, with a white
-          background and a thin black frame. Because it is real content
-          (not filler text), PyVista/VTK sizes the box to the actual widest
-          line, so long ``given``/``numerator`` expressions simply widen the
-          box instead of being clipped.
-        - three colored overlay actors (``legend_swatch_0/1/2``), each
-          drawn with the identical text, font size, and position as the
-          matching swatch line inside the background block, but with no
-          background/frame of their own. Because their glyphs land exactly
-          on top of the background block's glyphs, they visually replace
-          the black swatch text with the configured track color.
+        - ``legend_box``: the framed box, sized and positioned from the
+          real eight-line content, but drawn in white (matching
+          ``background_color``) and bold. Because its text is invisible
+          (white on white), only its white fill and black frame border are
+          actually seen -- but because it is real, bold content (not
+          filler), PyVista/VTK sizes the frame to fit the eventual bold
+          "Given .../ Numerator ..." sentence, so long ``given``/
+          ``numerator`` expressions or that sentence simply widen the box
+          instead of being clipped.
+        - ``legend_text``: the actual visible content, in plain (non-bold)
+          black, positioned identically but with no background/frame of
+          its own so it sits transparently on top of ``legend_box``'s
+          white fill. Its last line is left blank -- if it instead
+          repeated the real sentence text in non-bold black, that copy
+          would peek out from under the bold colored overlay below,
+          because bold and non-bold renderings of the same string use
+          different glyph shapes and spacing and never align
+          pixel-for-pixel (this was the original "ghosting" bug).
+        - ``legend_sentence``: just the final "Given .../ Numerator ..."
+          line, bold and colored with ``state.track_color``, with no
+          background/frame of its own. Because nothing non-bold sits
+          directly underneath it (``legend_box``'s copy is invisible,
+          ``legend_text``'s copy is blank), it renders cleanly with no
+          double-image artifact.
+
+        ``legend_box`` (bold) and ``legend_text`` (non-bold) may have very
+        slightly different internal line-to-line pitch for lines 1-7,
+        since bold and non-bold fonts can have marginally different line
+        height metrics. That's harmless here: those lines are either
+        invisible (in ``legend_box``) or the only visible copy (in
+        ``legend_text``), so the two never need to align the way the
+        bold/colored sentence line does.
         """
-        legend_lines = _build_legend_lines(state, self._gui_config)
-        legend_top_y = status_y - LEGEND_TOP_GAP_PX - LEGEND_LINE_COUNT * LEGEND_LINE_HEIGHT_PX
+        legend_lines = _build_legend_lines(state, self._simulation_result.n_events)
 
-        legend_text = "\n".join(text for text, _color in legend_lines)
+        sizing_text = "\n".join(legend_lines)
         legend_box_actor = self._plotter.add_text(
-            legend_text,
+            sizing_text,
             position=(LEGEND_LEFT_MARGIN_PX, legend_top_y),
             font_size=LEGEND_FONT_SIZE,
-            color="black",
+            color="white",
             name="legend_box",
         )
         legend_box_actor.prop.background_color = "white"
@@ -620,22 +663,29 @@ class EventDisplayController:
         legend_box_actor.prop.frame_color = "black"
         legend_box_actor.prop.frame_width = 1
         legend_box_actor.prop.show_frame = True
+        legend_box_actor.prop.bold = True
 
-        swatch_start_index = LEGEND_LINE_COUNT - 3
-        for swatch_offset in range(3):
-            line_index = swatch_start_index + swatch_offset
-            text, color = legend_lines[line_index]
-            # Text grows upward from the anchor point, so the line at
-            # `line_index` (0 = topmost) sits higher than later lines.
-            line_y = legend_top_y + LEGEND_LINE_HEIGHT_PX * (LEGEND_LINE_COUNT - 1 - line_index)
-            swatch_actor = self._plotter.add_text(
-                text,
-                position=(LEGEND_LEFT_MARGIN_PX, line_y),
-                font_size=LEGEND_FONT_SIZE,
-                color=color,
-                name=f"legend_swatch_{swatch_offset}",
-            )
-            swatch_actor.prop.show_frame = False
+        # The sentence line is blanked here -- it is rendered only by the
+        # bold `legend_sentence` overlay below.
+        visible_text = "\n".join(legend_lines[:-1] + [""])
+        text_actor = self._plotter.add_text(
+            visible_text,
+            position=(LEGEND_LEFT_MARGIN_PX, legend_top_y),
+            font_size=LEGEND_FONT_SIZE,
+            color="black",
+            name="legend_text",
+        )
+        text_actor.prop.show_frame = False
+
+        sentence_actor = self._plotter.add_text(
+            _build_legend_sentence_text(state),
+            position=(LEGEND_LEFT_MARGIN_PX, legend_top_y),
+            font_size=LEGEND_FONT_SIZE,
+            color=state.track_color,
+            name="legend_sentence",
+        )
+        sentence_actor.prop.show_frame = False
+        sentence_actor.prop.bold = True
 
     def _build_detector_opacity_map(self, state: EventDisplayState) -> dict[str, float]:
         """Dim detectors not referenced by the active conditional."""
@@ -648,7 +698,7 @@ class EventDisplayController:
         return detector_opacities
 
     def _add_navigation_buttons(self) -> None:
-        """Add one horizontal row of icon-only action buttons beside the axes widget."""
+        """Add one horizontal row of icon-only action buttons under the axes widget."""
         action_map: dict[str, Callable[[], None]] = {
             "Home": self._reset_view,
             "Previous": self._show_previous_state,
@@ -694,61 +744,55 @@ class EventDisplayController:
         )
         self._button_widgets.append(widget_holder["widget"])
 
+    def _add_nav_help_text(self) -> None:
+        """Draw the static key-binding hint text once, at the bottom of the axes/button stack.
 
-def _build_status_text(state: EventDisplayState, total_events: int) -> str:
-    """Build the counters-only overlay text shown above the legend."""
-    lines = [
-        f"Relevant track: {state.relevant_event_index + 1} / {state.relevant_event_count}",
-        f"Original event: {state.event_index + 1} / {total_events}",
-        f"State in event: {state.step_index_within_event + 1} / {state.step_count_within_event}",
-        "Keys: Left/Right Prev/Next state, q exit",
-    ]
-    return "\n".join(lines)
+        This text never changes between navigation steps, so it is added
+        once here (like the button widgets) instead of being redrawn on
+        every `_render_current_state` call.
+        """
+        self._plotter.add_text(
+            NAV_HELP_TEXT,
+            position=(BUTTON_LEFT_PADDING_PX, STACK_BOTTOM_MARGIN_PX),
+            font_size=LEGEND_FONT_SIZE,
+            name="nav_help_text",
+        )
 
 
-def _sanitize_for_multiline_text_actor(text: str | None) -> str | None:
-    """Replace characters that corrupt VTK's multiline text-actor layout.
+def _build_legend_lines(state: EventDisplayState, total_events: int) -> list[str]:
+    """Build the fixed eight-line status/legend content shown in the boxed overlay.
 
-    A literal ``|`` character (common in this project's conditional names,
-    e.g. ``"D1|T1*T2"``) makes the installed VTK text renderer misreport
-    that line's font metrics, which throws off the vertical spacing of
-    every line below it inside the same multiline text actor. The legend
-    box is one such multiline actor, so conditional names are displayed
-    with ``|`` replaced by the word "GIVEN" -- which also happens to match
-    the conditional-probability reading of the original notation, e.g.
-    ``"D1|T1*T2"`` becomes ``"D1 GIVEN T1*T2"``.
+    The two blank spacer lines are purely cosmetic grouping (event/track
+    counters, then the state counter, then the given/numerator
+    expressions) -- they carry no meaning of their own. The final line is
+    the single dynamic "Given .../ Numerator ..." sentence; it is built by
+    `_build_legend_sentence_text` and reused verbatim here so this plain,
+    non-bold copy and the bold colored overlay drawn on top of it (see
+    `EventDisplayController._render_legend`) can never drift out of sync.
     """
-    if text is None:
-        return None
-    return text.replace("|", " GIVEN ")
-
-
-def _build_legend_lines(
-    state: EventDisplayState,
-    gui_config: GUIConfig,
-) -> list[tuple[str, Any | None]]:
-    """Build the fixed six-line legend content shown below the status block.
-
-    Each entry is a ``(text, color)`` pair. The three header lines carry
-    ``color=None`` because they are rendered only once, as plain black text,
-    inside the single boxed background actor. The three swatch lines carry
-    the actual configured track color for that visible state, because they
-    are additionally drawn as colored overlay actors on top of the boxed
-    background (see ``EventDisplayController._render_legend``).
-
-    All six lines are always returned, regardless of ``state.state_name``,
-    because the legend explains all three possible visible track states at
-    once -- it does not highlight only the currently active one.
-    """
-    conditional_display_name = _sanitize_for_multiline_text_actor(state.conditional_name)
     return [
-        (f"CONDITIONAL: {conditional_display_name}", None),
-        (f"GIVEN: {state.given_expression}", None),
-        (f"NUMERATOR: {state.numerator_expression}", None),
-        ("GIVEN NO", gui_config.track_color_geometric_only),
-        ("GIVEN YES, NUMERATOR NO", gui_config.track_color_fired_given_only),
-        ("GIVEN YES, NUMERATOR YES", gui_config.track_color_fired_joint),
+        f"Event: {state.event_index + 1} / {total_events}",
+        f"Relevant track: {state.relevant_event_index + 1} / {state.relevant_event_count}",
+        "",
+        f"State in event: {state.step_index_within_event + 1} / {state.step_count_within_event}",
+        "",
+        f'numerator: "{state.numerator_expression}"',
+        f'given: "{state.given_expression}"',
+        _build_legend_sentence_text(state),
     ]
+
+
+def _build_legend_sentence_text(state: EventDisplayState) -> str:
+    """Build the single dynamic 'Given .../ Numerator ...' sentence line.
+
+    `numerator_fired` is shown as its real computed boolean even when
+    `given_fired` is False, not "N/A" -- the numerator condition is
+    evaluated independently of the given condition in
+    `build_event_states_for_event`, so it always has a well-defined value.
+    """
+    given_text = "YES" if state.given_fired else "NO"
+    numerator_text = "YES" if state.numerator_fired else "NO"
+    return f"Given {given_text} / Numerator {numerator_text}"
 
 
 def _require_pyvista() -> Any:

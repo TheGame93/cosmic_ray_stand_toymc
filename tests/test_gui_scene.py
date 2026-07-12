@@ -11,11 +11,17 @@ from toymc_cosmic.geometry import Detector
 from toymc_cosmic.gui.config import GUIConfig
 from toymc_cosmic.gui.scene import (
     DEFAULT_VIEWPORT_ASPECT_RATIO,
+    DEFAULT_WINDOW_HEIGHT_PX,
+    DEFAULT_WINDOW_WIDTH_PX,
     STARTUP_VIEW_DIRECTION,
     STARTUP_VIEW_UP,
     apply_camera_position,
+    build_plotter,
     build_startup_camera_position,
+    compute_axes_viewport,
     plotter_viewport_aspect_ratio,
+    plotter_window_height_px,
+    plotter_window_width_px,
     render_detector_colors,
     show_geometry_only,
 )
@@ -71,6 +77,108 @@ class GuiSceneTests(unittest.TestCase):
 
         self.assertAlmostEqual(plotter_viewport_aspect_ratio(explicit_ratio_plotter), 1600.0 / 900.0)
         self.assertEqual(plotter_viewport_aspect_ratio(fallback_ratio_plotter), DEFAULT_VIEWPORT_ASPECT_RATIO)
+
+    def test_plotter_window_height_px_uses_window_size_or_default(self) -> None:
+        """Window-height lookup should prefer the plotter window size but stay deterministic."""
+        explicit_height_plotter = mock.Mock(window_size=(1600, 900))
+        fallback_height_plotter = mock.Mock()
+        del fallback_height_plotter.window_size
+
+        self.assertEqual(plotter_window_height_px(explicit_height_plotter), 900.0)
+        self.assertEqual(plotter_window_height_px(fallback_height_plotter), DEFAULT_WINDOW_HEIGHT_PX)
+
+    def test_plotter_window_width_px_uses_window_size_or_default(self) -> None:
+        """Window-width lookup should prefer the plotter window size but stay deterministic."""
+        explicit_width_plotter = mock.Mock(window_size=(1600, 900))
+        fallback_width_plotter = mock.Mock()
+        del fallback_width_plotter.window_size
+
+        self.assertEqual(plotter_window_width_px(explicit_width_plotter), 1600.0)
+        self.assertEqual(plotter_window_width_px(fallback_width_plotter), DEFAULT_WINDOW_WIDTH_PX)
+
+    def test_compute_axes_viewport_shifts_bottom_edge_by_reserved_pixel_fraction(self) -> None:
+        """A non-zero pixel budget should shift the axes viewport up by that fraction."""
+        viewport = compute_axes_viewport(90.0, 900.0)
+        self.assertEqual(len(viewport), 4)
+        for actual, expected in zip(viewport, (0.0, 0.1, 0.2, 0.3)):
+            self.assertAlmostEqual(actual, expected)
+
+    def test_compute_axes_viewport_zero_reserve_matches_pyvista_default(self) -> None:
+        """No reserved space should reproduce PyVista's own default axes viewport."""
+        self.assertEqual(compute_axes_viewport(0.0, 900.0), (0.0, 0.0, 0.2, 0.2))
+
+    def test_compute_axes_viewport_rejects_negative_reserve(self) -> None:
+        """A negative pixel budget makes no sense and should fail loudly."""
+        with self.assertRaises(ValueError):
+            compute_axes_viewport(-1.0, 900.0)
+
+    def test_compute_axes_viewport_rejects_non_positive_window_height(self) -> None:
+        """A zero or negative window height cannot be converted into a fraction."""
+        with self.assertRaises(ValueError):
+            compute_axes_viewport(90.0, 0.0)
+        with self.assertRaises(ValueError):
+            compute_axes_viewport(90.0, -900.0)
+
+    def test_compute_axes_viewport_shifts_left_edge_by_horizontal_pixel_fraction(self) -> None:
+        """A non-zero horizontal shift should move both the left and right edges."""
+        viewport = compute_axes_viewport(0.0, 900.0, shift_right_px=160.0, window_width_px=1600.0)
+        for actual, expected in zip(viewport, (0.1, 0.0, 0.3, 0.2)):
+            self.assertAlmostEqual(actual, expected)
+
+    def test_compute_axes_viewport_zero_horizontal_shift_ignores_window_width(self) -> None:
+        """The default window_width_px must never cause a division error when unused."""
+        viewport = compute_axes_viewport(0.0, 900.0)
+        self.assertEqual(viewport, (0.0, 0.0, 0.2, 0.2))
+
+    def test_compute_axes_viewport_rejects_non_positive_window_width_when_shifting(self) -> None:
+        """A zero or negative window width cannot be converted into a fraction when shifting."""
+        with self.assertRaises(ValueError):
+            compute_axes_viewport(0.0, 900.0, shift_right_px=10.0, window_width_px=0.0)
+
+    @mock.patch("toymc_cosmic.gui.scene._require_pyvista")
+    def test_build_plotter_keeps_default_axes_when_reserve_is_zero(
+        self,
+        require_pyvista_mock: mock.Mock,
+    ) -> None:
+        """Geometry-only mode's default call must render the axes exactly as before."""
+        require_pyvista_mock.return_value = FakePyVistaModule()
+        detectors = [Detector("T1", [0.0, 0.0, 10.0], [2.0, 2.0, 1.0], 1.0)]
+
+        plotter = build_plotter(detectors, self._gui_config())
+
+        self.assertEqual(plotter.add_axes_calls, [{}])
+
+    @mock.patch("toymc_cosmic.gui.scene._require_pyvista")
+    def test_build_plotter_shifts_axes_viewport_when_reserve_given(
+        self,
+        require_pyvista_mock: mock.Mock,
+    ) -> None:
+        """Event-display mode's reserved pixel budget must reach `add_axes` as a viewport."""
+        require_pyvista_mock.return_value = FakePyVistaModule()
+        detectors = [Detector("T1", [0.0, 0.0, 10.0], [2.0, 2.0, 1.0], 1.0)]
+
+        plotter = build_plotter(detectors, self._gui_config(), reserve_bottom_px=90.0)
+
+        self.assertEqual(len(plotter.add_axes_calls), 1)
+        viewport = plotter.add_axes_calls[0]["viewport"]
+        for actual, expected in zip(viewport, (0.0, 0.1, 0.2, 0.3)):
+            self.assertAlmostEqual(actual, expected)
+
+    @mock.patch("toymc_cosmic.gui.scene._require_pyvista")
+    def test_build_plotter_shifts_axes_viewport_when_horizontal_shift_given(
+        self,
+        require_pyvista_mock: mock.Mock,
+    ) -> None:
+        """A non-zero horizontal shift alone must also reach `add_axes` as a viewport."""
+        require_pyvista_mock.return_value = FakePyVistaModule()
+        detectors = [Detector("T1", [0.0, 0.0, 10.0], [2.0, 2.0, 1.0], 1.0)]
+
+        plotter = build_plotter(detectors, self._gui_config(), shift_axes_right_px=160.0)
+
+        self.assertEqual(len(plotter.add_axes_calls), 1)
+        viewport = plotter.add_axes_calls[0]["viewport"]
+        for actual, expected in zip(viewport, (0.1, 0.0, 0.3, 0.2)):
+            self.assertAlmostEqual(actual, expected)
 
     @mock.patch("toymc_cosmic.gui.scene._require_pyvista")
     def test_render_detector_colors_applies_color_and_opacity_overrides(
@@ -154,28 +262,43 @@ class GuiSceneTests(unittest.TestCase):
 
 
 class FakePyVistaModule:
-    """Small stand-in for the Box factory used by the scene helper."""
+    """Small stand-in for the pyvista module functions used by the scene helper."""
 
     @staticmethod
     def Box(bounds: tuple[float, ...]) -> tuple[str, tuple[float, ...]]:
         """Return a simple tuple so tests can assert that a mesh was created."""
         return ("box", bounds)
 
+    @staticmethod
+    def Plotter() -> "FakePlotter":
+        """Return a fresh fake plotter, mirroring `pv.Plotter()` used by `build_plotter`."""
+        return FakePlotter()
+
 
 class FakePlotter:
-    """Record add_mesh calls issued by the scene renderer."""
+    """Record add_mesh/add_axes calls issued by the scene renderer."""
 
     def __init__(self) -> None:
-        """Initialize an empty mesh-call list."""
+        """Initialize empty call logs."""
         self.mesh_calls: list[dict[str, object]] = []
         self.camera_position: object | None = None
         self.reset_camera_clipping_range_calls = 0
         self.show_calls = 0
         self.window_size = (1600, 900)
+        self.background_color: object | None = None
+        self.add_axes_calls: list[dict[str, object]] = []
 
     def add_mesh(self, mesh: object, **kwargs: object) -> None:
         """Store mesh metadata without trying to render it."""
         self.mesh_calls.append({"mesh": mesh, **kwargs})
+
+    def set_background(self, color: object) -> None:
+        """Record the requested background color."""
+        self.background_color = color
+
+    def add_axes(self, **kwargs: object) -> None:
+        """Record the axes widget call, with or without an explicit viewport."""
+        self.add_axes_calls.append(kwargs)
 
     def reset_camera_clipping_range(self) -> None:
         """Record clipping-range updates triggered by the camera helper."""
