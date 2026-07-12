@@ -7,15 +7,23 @@
   <img src="https://img.shields.io/badge/status-active-brightgreen" alt="Active status">
 </p>
 
-<table>
+<table align="center" width="600">
   <tr>
-    <td>
+    <td align="center">
       <strong>Toy Monte Carlo for cosmic-ray stands</strong><br>
       A geometric Monte Carlo for estimating cosmic ray stand acceptance, trigger rates, and detector efficiencies.
     </td>
   </tr>
 </table>
 
+
+<p align="center">
+  <img src="docs/images/track_good.png" width="600" alt="Cosmic-ray track crossing the detector stand">
+  <br>
+  <em>A cosmic-ray track crossing two 10×10 cm² trigger scintillators (T1, T2) and firing the
+  6×5 cm² D1 detector. The central 6×5 cm² T3 scintillator (grey) sits in the geometry but is
+  not used by this particular logic configuration.</em>
+</p>
 
 > [!IMPORTANT]
 > The current engine is intentionally geometric and simple.
@@ -145,6 +153,19 @@ This runs the simulation once and then shows only relevant tracks.
   message
 - if no relevant tracks are found, event-display mode exits with a clear
   message
+
+<table align="center" width="600">
+  <tr>
+    <td align="center" width="33%"><img src="docs/images/track_good.png" width="100%" alt="Given and numerator both true"></td>
+    <td align="center" width="33%"><img src="docs/images/track_bad.png" width="100%" alt="Given true, numerator false"></td>
+    <td align="center" width="33%"><img src="docs/images/track_valid.png" width="100%" alt="Given false, numerator true"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Given YES / Numerator YES</strong><br>T1 and T2 both fire (given), and D1 also fires (numerator): a fully confirmed coincidence.</td>
+    <td align="center"><strong>Given YES / Numerator NO</strong><br>T1 and T2 fire the trigger, but D1 misses: an inefficiency in the small detector.</td>
+    <td align="center"><strong>Given NO / Numerator YES</strong><br>T2 fails to fire so the trigger condition is false, yet D1 still fires: an edge case where the numerator is true even though its given condition is not.</td>
+  </tr>
+</table>
 
 ## Configuration
 
