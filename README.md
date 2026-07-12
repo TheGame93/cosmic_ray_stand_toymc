@@ -7,7 +7,7 @@
   <img src="https://img.shields.io/badge/status-active-brightgreen" alt="Active status">
 </p>
 
-<table align="center" width="600">
+<table align="center" style="width:600px; max-width:100%;">
   <tr>
     <td align="center">
       <strong>Toy Monte Carlo for cosmic-ray stands</strong><br>
@@ -154,7 +154,7 @@ This runs the simulation once and then shows only relevant tracks.
 - if no relevant tracks are found, event-display mode exits with a clear
   message
 
-<table align="center" width="600">
+<table align="center" style="width:600px; max-width:100%;">
   <tr>
     <td align="center" width="33%"><img src="docs/images/track_good.png" width="100%" alt="Given and numerator both true"></td>
     <td align="center" width="33%"><img src="docs/images/track_bad.png" width="100%" alt="Given true, numerator false"></td>
