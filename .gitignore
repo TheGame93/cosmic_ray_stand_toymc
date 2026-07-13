@@ -1,3 +1,6 @@
+# personal data
+configs/my_*
+
 # Editor directories
 .vscode/
 .idea/
