@@ -1,5 +1,6 @@
 # personal data
 configs/my_*
+docs/human/
 
 # Editor directories
 .vscode/
