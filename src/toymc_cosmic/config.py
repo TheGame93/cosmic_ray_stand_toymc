@@ -78,7 +78,7 @@ class Config:
 
 
 def load_config(path: str | pathlib.Path) -> Config:
-    """Load, validate, and normalize a YAML configuration file."""
+    """Load, validate, and normalize a YAML configuration file; returns the resulting Config."""
     config_path = pathlib.Path(path)
     try:
         raw_data = yaml.safe_load(config_path.read_text())
@@ -188,7 +188,7 @@ def _parse_detectors(raw_detectors: Any) -> list[Detector]:
 
 
 def _parse_logic(raw_logic: Any, detector_names: set[str]) -> tuple[list[str], list[ConditionalConfig]]:
-    """Parse logic expressions and validate detector references."""
+    """Parse logic expressions and validate detector references; returns the validated expressions and conditional configs."""
     if raw_logic is None:
         return [], []
     if not isinstance(raw_logic, dict):

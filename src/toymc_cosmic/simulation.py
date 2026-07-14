@@ -50,7 +50,7 @@ def run_simulation(
     config: Config,
     progress_callback: ProgressCallback | None = None,
 ) -> SimulationResult:
-    """Run the full headless Monte Carlo pipeline.
+    """Run the full headless Monte Carlo pipeline; returns the completed SimulationResult.
 
     Args:
         config: Validated engine configuration.

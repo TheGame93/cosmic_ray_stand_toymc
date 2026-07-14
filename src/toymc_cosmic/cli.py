@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI either in headless or GUI mode."""
+    """Run the CLI either in headless or GUI mode; returns the process exit code."""
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_gui_arguments(parser, args)

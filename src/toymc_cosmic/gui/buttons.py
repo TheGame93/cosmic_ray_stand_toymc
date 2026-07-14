@@ -34,7 +34,7 @@ from .layout import (
 
 @dataclass(frozen=True)
 class NavigationButtonSpec:
-    """Describe one icon-only action button shown in the event display."""
+    """One icon-only action button shown in the event display."""
 
     name: str
     icon_kind: str

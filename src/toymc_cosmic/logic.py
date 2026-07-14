@@ -8,7 +8,7 @@ import numpy as np
 
 
 def evaluate(expression: str, context: dict[str, np.ndarray]) -> np.ndarray:
-    """Evaluate a boolean detector expression against array-valued inputs.
+    """Evaluate a boolean detector expression against array-valued inputs; returns a per-event boolean array.
 
     Args:
         expression: Expression such as `"T1 and T2 and not D1"`.
@@ -35,7 +35,7 @@ def extract_names(expression: str) -> set[str]:
 
 
 def _parse_expression(expression: str) -> ast.Expression:
-    """Parse and validate a boolean detector expression."""
+    """Parse and validate a boolean detector expression; returns the parsed AST expression."""
     if not isinstance(expression, str) or not expression.strip():
         raise ValueError("Logic expression must be a non-empty string.")
 
@@ -72,7 +72,7 @@ def _validate_node(node: ast.AST) -> None:
 
 
 def _evaluate_node(node: ast.AST, context: dict[str, np.ndarray]) -> np.ndarray:
-    """Recursively evaluate a validated AST node."""
+    """Recursively evaluate a validated AST node; returns the resulting boolean array."""
     if isinstance(node, ast.Name):
         if node.id not in context:
             raise ValueError(f"Unknown detector name in expression: {node.id}")

@@ -10,7 +10,7 @@ def apply_response(
     efficiencies: np.ndarray,
     rng: np.random.Generator,
 ) -> np.ndarray:
-    """Apply independent Bernoulli firing to every geometric crossing."""
+    """Apply independent Bernoulli firing to every geometric crossing; returns the resulting fired boolean matrix."""
     if crossed.ndim != 2:
         raise ValueError("crossed must have shape (n_events, n_detectors).")
 

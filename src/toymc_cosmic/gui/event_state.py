@@ -62,7 +62,7 @@ class EventDisplayState:
 
 
 class EventNavigator:
-    """Manage nested event/conditional stepping for the event display."""
+    """Stateful navigator for nested event/conditional stepping in the event display."""
 
     def __init__(
         self,
@@ -87,7 +87,7 @@ class EventNavigator:
         return event_states[self._state_index_within_event]
 
     def next_state(self) -> EventDisplayState:
-        """Advance to the next conditional state or the next event."""
+        """Advance to the next conditional state or the next event; returns the resulting state."""
         event_states = self._states_for_current_event()
         if self._state_index_within_event + 1 < len(event_states):
             self._state_index_within_event += 1
@@ -99,7 +99,7 @@ class EventNavigator:
         return self.current_state()
 
     def previous_state(self) -> EventDisplayState:
-        """Move back to the previous conditional state or previous event."""
+        """Move back to the previous conditional state or previous event; returns the resulting state."""
         if self._state_index_within_event > 0:
             self._state_index_within_event -= 1
             return self.current_state()

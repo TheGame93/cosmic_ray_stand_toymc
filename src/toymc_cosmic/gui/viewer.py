@@ -82,7 +82,7 @@ def show_event_display(config: Config, simulation_result: SimulationResult) -> N
 
 
 class EventDisplayController:
-    """Own the PyVista scene and update it as the user steps through events."""
+    """PyVista scene controller that redraws as the user steps through events."""
 
     def __init__(
         self,
@@ -265,7 +265,7 @@ class EventDisplayController:
         sentence_actor.prop.bold = True
 
     def _build_detector_opacity_map(self, state: EventDisplayState) -> dict[str, float]:
-        """Dim detectors not referenced by the active conditional."""
+        """Dim detectors not referenced by the active conditional; returns the per-detector opacity map."""
         detector_opacities: dict[str, float] = {}
         for detector in self._simulation_result.detectors:
             if detector.name in state.involved_detector_names:
