@@ -5,40 +5,52 @@ source_model:
   profile: uniform      # uniform | gaussian | divergence (not yet implemented)
   center: [0.0, 0.0]    # xc, yc
   size: [8.0]           # uniform: [diameter]; gaussian: [FWHM_x, FWHM_y]
-  flux_hz_per_cm2: 50.0 # uniform: the flux; gaussian: average over the FWHM ellipse
+  flux_hz_per_cm2: 10.0 # uniform: the flux; gaussian: average over the FWHM ellipse
 
 monte_carlo:
   n_events: 2000000
 
 detectors:
   - name: T1
-    center: [0.0, 0.0, 13.0]
-    size: [10.0, 10.0, 0.9]
-    efficiency: 0.8
-  - name: T3
-    center: [0.0, 0.0, 7.0]
-    size: [ 6.0,  5.0, 0.9]
-    efficiency: 0.8
-  - name: D1
-    center: [0.0, 0.0,  6.0]
-    size: [ 6.0,  5.0, 0.3]
+    center: [0.0, 0.0, 0]
+    size: [8.0, 8.0, 0.9]
     efficiency: 1
-  - name: T2
-    center: [0.0, 0.0, 0.0]
-    size: [10.0, 10.0, 0.9]
+  - name: D1
+    center: [0.0, 0.0,  5.0]
+    size: [10.0, 10.0, 0.3]
     efficiency: 0.8
+  - name: D2
+    center: [0.0, 0.0,  6.0]
+    size: [10.0, 10.0, 0.3]
+    efficiency: 0.8
+  - name: D3
+    center: [0.0, 0.0, 10.0]
+    size: [10.0, 10.0, 0.3]
+    efficiency: 0.8
+  - name: D4
+    center: [0.0, 0.0, 11.0]
+    size: [10.0, 10.0, 0.3]
+    efficiency: 0.8
+  - name: D5
+    center: [0.0, 0.0, 15.0]
+    size: [10.0, 10.0, 0.3]
+    efficiency: 0.8
+  - name: D6
+    center: [0.0, 0.0, 16.0]
+    size: [10.0, 10.0, 0.3]
+    efficiency: 0.8
+  - name: T2
+    center: [0.0, 0.0, 20.0]
+    size: [8.0, 8.0, 0.9]
+    efficiency: 1
 
 logic:
   expressions:
     - "T1 and T2"
-    - "T1 and T2 and T3"
   conditional:
-    - name: "D1|T1*T2"
-      numerator: "D1"
+    - name: "Good trigger"
+      numerator: "D1 or D2 or D3 or D4 or D5 or D6"
       given: "T1 and T2"
-    - name: "D1|T1*T2*T3"
-      numerator: "D1"
-      given: "T1 and T2 and T3"
 
 output:
   detector_rate_decimals: 3
@@ -55,8 +67,12 @@ gui:
   default_detector_color: lightgray
   detector_colors:
     T1: black
-    T3: black
-    D1: gray
+    D1: gold
+    D2: gold
+    D3: gold
+    D4: gold
+    D5: gold
+    D6: gold
     T2: black
   default_track_color: black
   track_color_geometric_only: black      # given true geometrically, but false in fired mode

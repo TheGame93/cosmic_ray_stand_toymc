@@ -1,4 +1,4 @@
-# Toy MC Cosmic Ray Stand: Acceptance, Rates and Efficiencies
+# Toy MC Particle Detector Stand: Acceptance, Rates and Efficiencies
 
 <p align="center">
   <img src="https://img.shields.io/badge/python-3.12-blue.svg" alt="Python 3.12">
@@ -24,6 +24,18 @@
   6×5 cm² D1 detector. The central 6×5 cm² T3 scintillator (grey, transparent)<br>sits in the geometry but is
   not used by this particular logic configuration.</em>
 </p>
+
+<table align="center" width="600">
+  <tr>
+    <td align="center" width="33%"><img src="docs/images/example_beam.png" width="100%" alt="Given true, numerator false"></td>
+    <td align="center" width="33%"><img src="docs/images/example_object.png" width="100%" alt="Given false, numerator true"></td>
+  </tr>
+  <tr>
+    <td align="center"><strong>Particle Beam</strong><br> setups</td>
+    <td align="center"><strong>Radioactive Sources</strong><br></td>
+  </tr>
+</table>
+
 
 > [!IMPORTANT]
 > The current engine is intentionally geometric and simple.

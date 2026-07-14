@@ -55,7 +55,7 @@ gui:
   detector_colors:
     T1: black
     T3: black
-    D1: gray
+    D1: gold
     T2: black
   default_track_color: black
   track_color_geometric_only: black      # given true geometrically, but false in fired mode
