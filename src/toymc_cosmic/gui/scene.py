@@ -9,6 +9,7 @@ import numpy as np
 
 from ..config import BeamSourceConfig, Config, ObjectSourceConfig, SourceModelConfig
 from ..geometry import Detector
+from ..source import build_source_model
 from .config import GUIConfig, load_gui_config
 
 
@@ -91,11 +92,16 @@ def build_plotter(
         plotter.add_axes()
 
     render_detector_colors(plotter, detectors, gui_config, {})
-    render_source_shape(plotter, source_config, gui_config)
+    render_source_shape(plotter, source_config, gui_config, detectors)
     return plotter
 
 
-def render_source_shape(plotter: Any, source_config: SourceModelConfig, gui_config: GUIConfig) -> None:
+def render_source_shape(
+    plotter: Any,
+    source_config: SourceModelConfig,
+    gui_config: GUIConfig,
+    detectors: list[Detector],
+) -> None:
     """Render the source volume once for `object`-type sources; no-op otherwise."""
     if not isinstance(source_config, ObjectSourceConfig):
         return
@@ -109,16 +115,7 @@ def render_source_shape(plotter: Any, source_config: SourceModelConfig, gui_conf
     elif source_config.shape == "disk":
         mesh = pv.Cylinder(center=center, direction=(0.0, 0.0, 1.0), radius=0.5 * size[0], height=size[1])
     else:
-        mesh = pv.Box(
-            bounds=(
-                center[0] - 0.5 * size[0],
-                center[0] + 0.5 * size[0],
-                center[1] - 0.5 * size[1],
-                center[1] + 0.5 * size[1],
-                center[2] - 0.5 * size[2],
-                center[2] + 0.5 * size[2],
-            )
-        )
+        mesh = pv.Box(bounds=build_source_model(source_config).spatial_bounds(detectors))
 
     plotter.add_mesh(
         mesh,

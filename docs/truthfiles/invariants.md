@@ -17,12 +17,11 @@ figure out which before proceeding.
     `0 < theta_max_deg < 90` (strict both ends), converted to radians
     (`theta_max`) at load time; `model` only accepts `"cos2"`;
     `flux_hz_per_cm2` must be `> 0`.
-  - `beam` → `BeamSourceConfig`: `profile` must be `"uniform"`,
-    `"gaussian"`, or `"divergence"`; `center` is a 2-element `(xc, yc)`
-    list; `size` length must match the profile (`uniform`: 1,
-    `gaussian`: 2) with all components `> 0` — **except** `divergence`,
-    whose `size` is accepted unvalidated (format is not yet defined; see
-    Source below for where this actually fails); `flux_hz_per_cm2` must be
+  - `beam` → `BeamSourceConfig`: `profile` must be `"uniform"` or
+    `"gaussian"` (`"divergence"` is rejected with `ConfigError` — not yet
+    implemented, see `docs/truthfiles/goal.md`); `center` is a 2-element
+    `(xc, yc)` list; `size` length must match the profile (`uniform`: 1,
+    `gaussian`: 2) with all components `> 0`; `flux_hz_per_cm2` must be
     `> 0`.
   - `object` → `ObjectSourceConfig`: `shape` must be `"sphere"`, `"disk"`,
     or `"box"`; `center` is a 3-element `(xc, yc, zc)` list; `size` length
@@ -84,28 +83,41 @@ figure out which before proceeding.
 
 ## Source (`source.py`)
 
-- `SourceModel.generate` requires `count > 0`.
-- **`CosmicSourceModel`**: origin `(x, y)` uniform over `generation_region`,
-  `z` fixed at `reference_z`; direction `direction_z = -cos(theta)` with
-  `theta` from the configured `Cos2AngularModel` and `phi` uniform over
+- `SourceModel.generate` requires `count > 0`. `CosmicSourceModel`/
+  `BeamSourceModel` cache their detector-derived geometry
+  (`generation_region`/`reference_z`, `min_reference_z` respectively) on
+  first `generate()` call — safe because `detectors` never changes across
+  chunks within one `run_simulation` call, but means a `SourceModel`
+  instance must not be reused across two different detector lists.
+- **`CosmicSourceModel`**: `model` must be `"cos2"` (validated again at
+  construction time, not just in `config.py`) and is what selects
+  `Cos2AngularModel`. origin `(x, y)` uniform over `generation_region`, `z`
+  fixed at `reference_z`; direction `direction_z = -cos(theta)` with
+  `theta` from the configured angular model and `phi` uniform over
   `[0, 2*pi)` — tracks point **downward** (negative z), unchanged from the
   engine's original single-source behavior. `total_rate_hz = flux_hz_per_cm2
   * area_gen`.
 - **`BeamSourceModel`**: origin `z` fixed at `min_reference_z` (upstream
   face); direction is exactly `(0, 0, +1)` for every event (no angular
   spread) — the beam travels `-z -> +z`, opposite the cosmic source's
-  downward convention. Transverse `(x, y)`:
+  downward convention. `profile` must be `"uniform"` or `"gaussian"`
+  (validated again at construction time). Transverse `(x, y)`:
   - `uniform`: sampled uniformly inside the disk of diameter `size[0]`
     centered at `center`; `total_rate_hz = flux_hz_per_cm2 * pi *
     (size[0]/2)**2`.
-  - `gaussian`: `x`/`y` sampled independently from
-    `Normal(center, size/_FWHM_TO_SIGMA)` (`_FWHM_TO_SIGMA =
-    2*sqrt(2*ln 2)`); `total_rate_hz = flux_hz_per_cm2 * pi *
-    (size[0]/2) * (size[1]/2)` (the FWHM-ellipse area, matching
-    `flux_hz_per_cm2`'s "average over the FWHM ellipse" definition).
-  - `divergence`: constructing `BeamSourceModel` with this profile always
-    raises `NotImplementedError` — `config.py` accepts the YAML key, but no
-    model exists yet.
+  - `gaussian`: `x`/`y` sampled from a 2D gaussian with
+    `sigma = size/_FWHM_TO_SIGMA` (`_FWHM_TO_SIGMA = 2*sqrt(2*ln 2)`),
+    **truncated** via vectorized rejection sampling to the ellipse of
+    semi-axes `_GAUSSIAN_TRUNCATION_SIGMA_MULTIPLE * sigma`
+    (`_GAUSSIAN_TRUNCATION_SIGMA_MULTIPLE = 5`) — guarantees every sampled
+    origin lies within `spatial_bounds`, at a truncated-mass cost of
+    `~3.7e-6`, negligible for this engine. `total_rate_hz = 2 *
+    flux_hz_per_cm2 * pi * (size[0]/2) * (size[1]/2)`: the FWHM ellipse
+    (`_footprint_area`) is exactly `pi * (size[0]/2) * (size[1]/2)`, and
+    contains exactly half of an independent 2D gaussian's mass (the
+    semi-axis `FWHM/2 = 1.1774*sigma` is the 2D-Rayleigh median radius in
+    standardized units), so the total rate over the full population is
+    twice `flux_hz_per_cm2` times that ellipse area.
 - **`ObjectSourceModel`**: origin sampled uniformly inside the configured
   volume (`sphere`: closed-form `r = R*u**(1/3)` with an isotropic unit
   vector; `disk`: uniform in a cylinder, `r = R*sqrt(u)` in-plane and
@@ -113,14 +125,17 @@ figure out which before proceeding.
   sampling anywhere). Direction is isotropic over the full 4*pi sphere
   (`cos(theta) ~ U(-1,1)`, `phi ~ U(0, 2*pi)`), not just a downward
   hemisphere. `total_rate_hz = activity_hz` directly, independent of
-  detector geometry. No collimation exists yet.
+  detector geometry. No collimation exists yet. `shape` must be `"sphere"`,
+  `"disk"`, or `"box"` (validated again at construction time).
 - `build_source_model` dispatches on the config dataclass's Python type
   (`CosmicSourceConfig` / `BeamSourceConfig` / `ObjectSourceConfig`) via
   `isinstance`.
 - `SourceModel.spatial_bounds` returns each source's own axis-aligned
-  footprint, independent of the detector stack; it exists purely for the
-  GUI's display-box sizing (see GUI cross-cutting below) and is not used by
-  `simulation.py`.
+  footprint, independent of the detector stack. For every source type this
+  is a **true hard bound** on what `generate()` can produce (exact for
+  cosmic/uniform-beam/object; truncation-guaranteed for gaussian beam). It
+  exists for the GUI's display-box sizing and object-source mesh bounds
+  (see GUI cross-cutting below) and is not used by `simulation.py`.
 
 ## Response (`response.py`)
 

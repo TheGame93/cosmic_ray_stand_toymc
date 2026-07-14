@@ -26,7 +26,7 @@ class CosmicSourceModelTests(unittest.TestCase):
         theta_max = math.radians(80.0)
         rng = np.random.default_rng(10)
 
-        model = CosmicSourceModel(theta_max=theta_max, flux_hz_per_cm2=0.01)
+        model = CosmicSourceModel(theta_max=theta_max, model="cos2", flux_hz_per_cm2=0.01)
         tracks = model.generate(500, detectors, rng)
         x_min, x_max, y_min, y_max, _ = generation_region(detectors, theta_max)
 
@@ -44,10 +44,15 @@ class CosmicSourceModelTests(unittest.TestCase):
         """total_rate_hz must equal flux_hz_per_cm2 * area_gen."""
         detectors = [Detector("T1", [0.0, 0.0, 10.0], [2.0, 2.0, 2.0], 1.0)]
         theta_max = math.radians(80.0)
-        model = CosmicSourceModel(theta_max=theta_max, flux_hz_per_cm2=0.01)
+        model = CosmicSourceModel(theta_max=theta_max, model="cos2", flux_hz_per_cm2=0.01)
 
         _, _, _, _, area_gen = generation_region(detectors, theta_max)
         self.assertAlmostEqual(model.total_rate_hz(detectors), 0.01 * area_gen)
+
+    def test_unsupported_model_raises(self) -> None:
+        """An unsupported cosmic angular model name must raise ValueError at construction time."""
+        with self.assertRaises(ValueError):
+            CosmicSourceModel(theta_max=math.radians(80.0), model="flat", flux_hz_per_cm2=0.01)
 
 
 class BeamSourceModelTests(unittest.TestCase):
@@ -77,12 +82,17 @@ class BeamSourceModelTests(unittest.TestCase):
         expected = 10.0 * math.pi * 2.0**2
         self.assertAlmostEqual(model.total_rate_hz(self.detectors), expected)
 
-    def test_gaussian_total_rate_hz_is_flux_times_fwhm_ellipse_area(self) -> None:
-        """total_rate_hz for a gaussian profile must equal flux * FWHM ellipse area."""
+    def test_gaussian_total_rate_hz_is_twice_flux_times_fwhm_ellipse_area(self) -> None:
+        """total_rate_hz for a gaussian profile must equal 2 * flux * FWHM ellipse area.
+
+        The FWHM ellipse contains exactly half of an independent 2D
+        gaussian's mass, so the total rate over the full sampled population
+        is twice flux_hz_per_cm2 times that ellipse area.
+        """
         model = BeamSourceModel(
             profile="gaussian", center=(0.0, 0.0), size=(4.0, 2.0), flux_hz_per_cm2=10.0
         )
-        expected = 10.0 * math.pi * 2.0 * 1.0
+        expected = 2.0 * 10.0 * math.pi * 2.0 * 1.0
         self.assertAlmostEqual(model.total_rate_hz(self.detectors), expected)
 
     def test_gaussian_origins_scatter_around_center(self) -> None:
@@ -95,9 +105,23 @@ class BeamSourceModelTests(unittest.TestCase):
         self.assertAlmostEqual(float(np.mean(tracks.origins[:, 0])), 5.0, delta=0.1)
         self.assertAlmostEqual(float(np.mean(tracks.origins[:, 1])), -3.0, delta=0.1)
 
-    def test_divergence_profile_raises_not_implemented(self) -> None:
-        """The divergence profile must raise NotImplementedError at construction time."""
-        with self.assertRaises(NotImplementedError):
+    def test_gaussian_origins_never_exceed_spatial_bounds(self) -> None:
+        """Truncated gaussian sampling must never place an origin outside spatial_bounds."""
+        rng = np.random.default_rng(7)
+        model = BeamSourceModel(
+            profile="gaussian", center=(0.0, 0.0), size=(2.0, 3.0), flux_hz_per_cm2=10.0
+        )
+        tracks = model.generate(50000, self.detectors, rng)
+
+        x_min, x_max, y_min, y_max, _, _ = model.spatial_bounds(self.detectors)
+        self.assertTrue(np.all(tracks.origins[:, 0] >= x_min))
+        self.assertTrue(np.all(tracks.origins[:, 0] <= x_max))
+        self.assertTrue(np.all(tracks.origins[:, 1] >= y_min))
+        self.assertTrue(np.all(tracks.origins[:, 1] <= y_max))
+
+    def test_invalid_profile_raises(self) -> None:
+        """An unsupported beam profile must raise ValueError at construction time."""
+        with self.assertRaises(ValueError):
             BeamSourceModel(profile="divergence", center=(0.0, 0.0), size=(1.0,), flux_hz_per_cm2=1.0)
 
 
@@ -158,6 +182,11 @@ class ObjectSourceModelTests(unittest.TestCase):
         """total_rate_hz must equal the configured activity_hz, independent of detectors."""
         model = ObjectSourceModel(shape="sphere", center=(0.0, 0.0, 0.0), size=(1.0,), activity_hz=42.0)
         self.assertEqual(model.total_rate_hz(self.detectors), 42.0)
+
+    def test_invalid_shape_raises(self) -> None:
+        """An unsupported object shape must raise ValueError at construction time."""
+        with self.assertRaises(ValueError):
+            ObjectSourceModel(shape="cube", center=(0.0, 0.0, 0.0), size=(1.0,), activity_hz=1.0)
 
 
 class BuildSourceModelTests(unittest.TestCase):

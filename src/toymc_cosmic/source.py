@@ -14,7 +14,7 @@ from .tracks import Tracks
 
 
 _FWHM_TO_SIGMA = 2.0 * math.sqrt(2.0 * math.log(2.0))
-_GAUSSIAN_DISPLAY_SIGMA_MULTIPLE = 3.0
+_GAUSSIAN_TRUNCATION_SIGMA_MULTIPLE = 5.0
 
 
 class SourceModel(ABC):
@@ -38,19 +38,29 @@ class SourceModel(ABC):
 class CosmicSourceModel(SourceModel):
     """Downward cosmic-ray source: `cos^2` zenith sampling over a flat generation plane."""
 
-    def __init__(self, theta_max: float, flux_hz_per_cm2: float) -> None:
+    def __init__(self, theta_max: float, model: str, flux_hz_per_cm2: float) -> None:
         """Store the cosmic source parameters and build its angular model."""
         self.theta_max = theta_max
+        self.model = model
         self.flux_hz_per_cm2 = flux_hz_per_cm2
-        self.angular_model = Cos2AngularModel()
+        if model == "cos2":
+            self.angular_model = Cos2AngularModel()
+        else:
+            raise ValueError(f"Unsupported cosmic angular model: {model}")
+
+        self._cached_generation_region: tuple[float, float, float, float, float] | None = None
+        self._cached_reference_z: float | None = None
 
     def generate(self, count: int, detectors: list[Detector], rng: np.random.Generator) -> Tracks:
         """Sample tracks from a flat plane above the detector stack; returns Tracks."""
         if count <= 0:
             raise ValueError("count must be positive.")
 
-        x_min, x_max, y_min, y_max, _ = generation_region(detectors, self.theta_max)
-        z_origin = reference_z(detectors)
+        if self._cached_generation_region is None:
+            self._cached_generation_region = generation_region(detectors, self.theta_max)
+            self._cached_reference_z = reference_z(detectors)
+        x_min, x_max, y_min, y_max, _ = self._cached_generation_region
+        z_origin = self._cached_reference_z
 
         x_positions = rng.uniform(x_min, x_max, size=count)
         y_positions = rng.uniform(y_min, y_max, size=count)
@@ -92,12 +102,7 @@ class BeamSourceModel(SourceModel):
         size: tuple[float, ...],
         flux_hz_per_cm2: float,
     ) -> None:
-        """Store the beam parameters; raises NotImplementedError for the unimplemented divergence profile."""
-        if profile == "divergence":
-            raise NotImplementedError(
-                "source_model profile 'divergence' is not implemented yet; "
-                "only 'uniform' and 'gaussian' beam profiles are wired up."
-            )
+        """Store the beam parameters."""
         if profile not in ("uniform", "gaussian"):
             raise ValueError(f"Unsupported beam profile: {profile}")
 
@@ -105,13 +110,17 @@ class BeamSourceModel(SourceModel):
         self.center = center
         self.size = size
         self.flux_hz_per_cm2 = flux_hz_per_cm2
+        self._cached_min_reference_z: float | None = None
 
     def generate(self, count: int, detectors: list[Detector], rng: np.random.Generator) -> Tracks:
         """Sample tracks from the upstream face traveling in `+z`; returns Tracks."""
         if count <= 0:
             raise ValueError("count must be positive.")
 
-        z_origin = min_reference_z(detectors)
+        if self._cached_min_reference_z is None:
+            self._cached_min_reference_z = min_reference_z(detectors)
+        z_origin = self._cached_min_reference_z
+
         x_positions, y_positions = self._sample_transverse_positions(count, rng)
         z_positions = np.full(count, z_origin, dtype=float)
 
@@ -120,31 +129,79 @@ class BeamSourceModel(SourceModel):
         directions[:, 2] = 1.0
         return Tracks(origins=origins, directions=directions)
 
+    def _uniform_radius(self) -> float:
+        """Return the `uniform`-profile disk radius."""
+        return 0.5 * self.size[0]
+
+    def _gaussian_sigma(self) -> tuple[float, float]:
+        """Return the `gaussian`-profile `(sigma_x, sigma_y)` derived from the configured FWHM."""
+        return self.size[0] / _FWHM_TO_SIGMA, self.size[1] / _FWHM_TO_SIGMA
+
     def _sample_transverse_positions(
         self, count: int, rng: np.random.Generator
     ) -> tuple[np.ndarray, np.ndarray]:
         """Sample `(x, y)` transverse positions matching the configured profile."""
-        x_center, y_center = self.center
-
         if self.profile == "uniform":
-            radius = 0.5 * self.size[0]
+            x_center, y_center = self.center
+            radius = self._uniform_radius()
             r = radius * np.sqrt(rng.uniform(0.0, 1.0, size=count))
             phi = rng.uniform(0.0, 2.0 * math.pi, size=count)
             return x_center + r * np.cos(phi), y_center + r * np.sin(phi)
 
-        sigma_x = self.size[0] / _FWHM_TO_SIGMA
-        sigma_y = self.size[1] / _FWHM_TO_SIGMA
-        return rng.normal(x_center, sigma_x, size=count), rng.normal(y_center, sigma_y, size=count)
+        return self._sample_gaussian_transverse_positions(count, rng)
+
+    def _sample_gaussian_transverse_positions(
+        self, count: int, rng: np.random.Generator
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Sample `(x, y)` from a 2D gaussian truncated to the `spatial_bounds` ellipse.
+
+        Truncating (instead of sampling a true unbounded normal) guarantees
+        every generated origin actually lies within `spatial_bounds`, which
+        both the GUI's display-box clipping and `total_rate_hz`'s
+        FWHM-ellipse-is-half-the-mass relationship depend on being exact.
+        Uses vectorized rejection sampling: at
+        `_GAUSSIAN_TRUNCATION_SIGMA_MULTIPLE = 5`, the per-sample rejection
+        probability is about 3.7e-6, so this converges in 1-2 iterations
+        even for millions of events.
+        """
+        x_center, y_center = self.center
+        sigma_x, sigma_y = self._gaussian_sigma()
+
+        x_positions = np.empty(count, dtype=float)
+        y_positions = np.empty(count, dtype=float)
+        pending_indices = np.arange(count)
+
+        while pending_indices.size > 0:
+            candidate_x = rng.normal(x_center, sigma_x, size=pending_indices.size)
+            candidate_y = rng.normal(y_center, sigma_y, size=pending_indices.size)
+
+            normalized_radius_sq = (
+                ((candidate_x - x_center) / (_GAUSSIAN_TRUNCATION_SIGMA_MULTIPLE * sigma_x)) ** 2
+                + ((candidate_y - y_center) / (_GAUSSIAN_TRUNCATION_SIGMA_MULTIPLE * sigma_y)) ** 2
+            )
+            accepted = normalized_radius_sq <= 1.0
+
+            x_positions[pending_indices[accepted]] = candidate_x[accepted]
+            y_positions[pending_indices[accepted]] = candidate_y[accepted]
+            pending_indices = pending_indices[~accepted]
+
+        return x_positions, y_positions
 
     def total_rate_hz(self, detectors: list[Detector]) -> float:
-        """Return `flux_hz_per_cm2 * transverse footprint area`."""
+        """Return the source's total physical rate, in Hz."""
+        if self.profile == "gaussian":
+            # The FWHM ellipse `_footprint_area` describes contains exactly
+            # half of an independent 2D gaussian's mass (semi-axis =
+            # FWHM/2 = 1.1774*sigma is the 2D-Rayleigh median radius in
+            # standardized units), so the total rate over the full sampled
+            # population is twice flux_hz_per_cm2 times that ellipse area.
+            return 2.0 * self.flux_hz_per_cm2 * self._footprint_area()
         return self.flux_hz_per_cm2 * self._footprint_area()
 
     def _footprint_area(self) -> float:
         """Return the disk (`uniform`) or FWHM-ellipse (`gaussian`) footprint area."""
         if self.profile == "uniform":
-            radius = 0.5 * self.size[0]
-            return math.pi * radius**2
+            return math.pi * self._uniform_radius() ** 2
         return math.pi * (0.5 * self.size[0]) * (0.5 * self.size[1])
 
     def spatial_bounds(
@@ -153,10 +210,11 @@ class BeamSourceModel(SourceModel):
         """Return the beam's transverse footprint spanning from the upstream face to the far detector face."""
         x_center, y_center = self.center
         if self.profile == "uniform":
-            half_x = half_y = 0.5 * self.size[0]
+            half_x = half_y = self._uniform_radius()
         else:
-            half_x = _GAUSSIAN_DISPLAY_SIGMA_MULTIPLE * (self.size[0] / _FWHM_TO_SIGMA)
-            half_y = _GAUSSIAN_DISPLAY_SIGMA_MULTIPLE * (self.size[1] / _FWHM_TO_SIGMA)
+            sigma_x, sigma_y = self._gaussian_sigma()
+            half_x = _GAUSSIAN_TRUNCATION_SIGMA_MULTIPLE * sigma_x
+            half_y = _GAUSSIAN_TRUNCATION_SIGMA_MULTIPLE * sigma_y
 
         z_near = min_reference_z(detectors)
         z_far = reference_z(detectors)
@@ -263,6 +321,7 @@ def build_source_model(source_config: SourceModelConfig) -> SourceModel:
     if isinstance(source_config, CosmicSourceConfig):
         return CosmicSourceModel(
             theta_max=source_config.theta_max,
+            model=source_config.model,
             flux_hz_per_cm2=source_config.flux_hz_per_cm2,
         )
     if isinstance(source_config, BeamSourceConfig):

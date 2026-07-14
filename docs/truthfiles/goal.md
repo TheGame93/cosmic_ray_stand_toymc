@@ -47,8 +47,8 @@ yet exposed through YAML. Treat this as a fact about the current codebase,
 not a commitment — see `docs/human/plan_engine.md` for the original design
 intent.
 
-Similarly, the `beam` source's `divergence` profile is recognized by
-`config.py` (the YAML key parses) but has no implementation:
-`source.BeamSourceModel` raises `NotImplementedError` if constructed with
-`profile: divergence`. The `object` source's isotropic 4*pi emission has no
-collimation option — a future addition, not modeled today.
+Similarly, the `beam` source's `divergence` profile has no implementation
+yet: `config.py` rejects `profile: divergence` with `ConfigError` at
+load time, same as any other not-yet-supported option in this codebase.
+The `object` source's isotropic 4*pi emission has no collimation option —
+a future addition, not modeled today.

@@ -228,7 +228,7 @@ transverse spatial profile:
 ```yaml
 source_model:
   type: beam
-  profile: uniform      # uniform | gaussian | divergence (not yet implemented)
+  profile: uniform      # uniform | gaussian (divergence is rejected: not yet implemented)
   center: [0.0, 0.0]    # xc, yc
   size: [8.0]           # uniform: [diameter]; gaussian: [FWHM_x, FWHM_y]
   flux_hz_per_cm2: 50.0 # uniform: the flux; gaussian: average over the FWHM ellipse

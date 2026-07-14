@@ -105,12 +105,16 @@ def _read_color(value: Any, field_name: str) -> ColorValue:
     raise ValueError(f"{field_name} must be a color string or a 3-element RGB list.")
 
 
-def _read_positive_float(value: Any, field_name: str) -> float:
-    """Read a strictly positive float from the GUI settings."""
+def _read_float_value(value: Any, field_name: str) -> float:
+    """Read a numeric field and convert it to float."""
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{field_name} must be numeric.")
+    return float(value)
 
-    numeric_value = float(value)
+
+def _read_positive_float(value: Any, field_name: str) -> float:
+    """Read a strictly positive float from the GUI settings."""
+    numeric_value = _read_float_value(value, field_name)
     if numeric_value <= 0.0:
         raise ValueError(f"{field_name} must be strictly positive.")
     return numeric_value
@@ -118,10 +122,7 @@ def _read_positive_float(value: Any, field_name: str) -> float:
 
 def _read_unit_interval_float(value: Any, field_name: str) -> float:
     """Read a float in the inclusive `[0, 1]` range from the GUI settings."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{field_name} must be numeric.")
-
-    numeric_value = float(value)
+    numeric_value = _read_float_value(value, field_name)
     if not 0.0 <= numeric_value <= 1.0:
         raise ValueError(f"{field_name} must be between 0 and 1.")
     return numeric_value

@@ -275,11 +275,31 @@ class GuiSceneTests(unittest.TestCase):
             shape="sphere", center=(0.0, 0.0, 0.0), size=(2.0,), activity_hz=1.0
         )
 
-        render_source_shape(plotter, object_config, self._gui_config())
+        render_source_shape(plotter, object_config, self._gui_config(), [])
 
         self.assertEqual(len(plotter.mesh_calls), 1)
         self.assertEqual(plotter.mesh_calls[0]["color"], "orange")
         self.assertEqual(plotter.mesh_calls[0]["opacity"], 0.25)
+
+    @mock.patch("toymc_cosmic.gui.scene._require_pyvista")
+    def test_render_source_shape_box_reuses_object_source_model_spatial_bounds(
+        self,
+        require_pyvista_mock: mock.Mock,
+    ) -> None:
+        """A box-shape object source's mesh bounds must match ObjectSourceModel.spatial_bounds."""
+        require_pyvista_mock.return_value = FakePyVistaModule()
+        plotter = FakePlotter()
+        detectors = [Detector("T1", [0.0, 0.0, 10.0], [2.0, 2.0, 1.0], 1.0)]
+        object_config = ObjectSourceConfig(
+            shape="box", center=(1.0, 2.0, 3.0), size=(4.0, 6.0, 8.0), activity_hz=1.0
+        )
+
+        render_source_shape(plotter, object_config, self._gui_config(), detectors)
+
+        self.assertEqual(
+            plotter.mesh_calls[0]["mesh"],
+            ("box", (-1.0, 3.0, -1.0, 5.0, -1.0, 7.0)),
+        )
 
     @mock.patch("toymc_cosmic.gui.scene._require_pyvista")
     def test_render_source_shape_is_a_no_op_for_non_object_sources(
@@ -290,7 +310,7 @@ class GuiSceneTests(unittest.TestCase):
         require_pyvista_mock.return_value = FakePyVistaModule()
         plotter = FakePlotter()
 
-        render_source_shape(plotter, _COSMIC_SOURCE_CONFIG, self._gui_config())
+        render_source_shape(plotter, _COSMIC_SOURCE_CONFIG, self._gui_config(), [])
 
         self.assertEqual(plotter.mesh_calls, [])
 

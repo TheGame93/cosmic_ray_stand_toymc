@@ -15,7 +15,7 @@ import math
 
 import numpy as np
 
-from ..geometry import Detector, bounding_box
+from ..geometry import Detector, bounding_box, min_reference_z, reference_z
 from ..source import SourceModel
 
 
@@ -49,9 +49,7 @@ def compute_display_bounds(detectors: list[Detector], source_model: SourceModel)
 def _detector_bounds(detectors: list[Detector]) -> tuple[float, float, float, float, float, float]:
     """Return the detector stack's own axis-aligned bounds."""
     x_min, x_max, y_min, y_max = bounding_box(detectors)
-    z_min = min(float(detector.lower_bounds[2]) for detector in detectors)
-    z_max = max(float(detector.upper_bounds[2]) for detector in detectors)
-    return x_min, x_max, y_min, y_max, z_min, z_max
+    return x_min, x_max, y_min, y_max, min_reference_z(detectors), reference_z(detectors)
 
 
 def _union_bounds(
@@ -72,28 +70,25 @@ def _union_bounds(
 def _pad_bounds(bounds: tuple[float, float, float, float, float, float]) -> DisplayBounds:
     """Pad every axis of a raw bounds tuple into a `DisplayBounds`."""
     x_min, x_max, y_min, y_max, z_min, z_max = bounds
+    padded_x_min, padded_x_max = _pad(x_min, x_max)
+    padded_y_min, padded_y_max = _pad(y_min, y_max)
+    padded_z_min, padded_z_max = _pad(z_min, z_max)
     return DisplayBounds(
-        x_min=_padded_min(x_min, x_max),
-        x_max=_padded_max(x_min, x_max),
-        y_min=_padded_min(y_min, y_max),
-        y_max=_padded_max(y_min, y_max),
-        z_min=_padded_min(z_min, z_max),
-        z_max=_padded_max(z_min, z_max),
+        x_min=padded_x_min,
+        x_max=padded_x_max,
+        y_min=padded_y_min,
+        y_max=padded_y_max,
+        z_min=padded_z_min,
+        z_max=padded_z_max,
     )
 
 
-def _padded_min(axis_min: float, axis_max: float) -> float:
-    """Return `axis_min` padded outward by 10% of its span or magnitude."""
+def _pad(axis_min: float, axis_max: float) -> tuple[float, float]:
+    """Return `(axis_min, axis_max)` each padded outward by 10% of the span or magnitude."""
     span = axis_max - axis_min
-    margin = 0.1 * max(abs(axis_min), span)
-    return axis_min - margin
-
-
-def _padded_max(axis_min: float, axis_max: float) -> float:
-    """Return `axis_max` padded outward by 10% of its span or magnitude."""
-    span = axis_max - axis_min
-    margin = 0.1 * max(abs(axis_max), span)
-    return axis_max + margin
+    lower_margin = 0.1 * max(abs(axis_min), span)
+    upper_margin = 0.1 * max(abs(axis_max), span)
+    return axis_min - lower_margin, axis_max + upper_margin
 
 
 def clip_line_to_bounds(

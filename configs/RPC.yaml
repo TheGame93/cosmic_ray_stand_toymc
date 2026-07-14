@@ -31,7 +31,6 @@ logic:
   expressions:
     - "T1 and T2"
     - "RPC1 or RPC2"
-    - "RPC1 and RPC2"
   conditional:
     - name: "single gap efficiency"
       numerator: "RPC1"
@@ -55,8 +54,8 @@ gui:
   default_detector_color: lightgray
   detector_colors:
     T1: black
-    RPC1: gray
-    RPC2: gray
+    RPC1: gold
+    RPC2: gold
     T2: black
   default_track_color: black
   track_color_geometric_only: black      # given true geometrically, but false in fired mode

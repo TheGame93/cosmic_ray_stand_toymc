@@ -355,8 +355,8 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             load_config(self._write_config(config_text))
 
-    def test_beam_divergence_accepted_with_unvalidated_size(self) -> None:
-        """The divergence profile is accepted at parse time even though it's unimplemented."""
+    def test_beam_divergence_rejected(self) -> None:
+        """The unimplemented divergence profile must be rejected at config-load time."""
         config_text = """
         source_model:
           type: beam
@@ -373,10 +373,8 @@ class ConfigTests(unittest.TestCase):
             efficiency: 0.9
         """
 
-        config = load_config(self._write_config(config_text))
-        assert isinstance(config.source_model, BeamSourceConfig)
-        self.assertEqual(config.source_model.profile, "divergence")
-        self.assertEqual(config.source_model.size, (1.0, 2.0, 3.0, 4.0))
+        with self.assertRaises(ConfigError):
+            load_config(self._write_config(config_text))
 
     def test_beam_unsupported_profile_raises(self) -> None:
         """Beam profile must be one of the recognized names."""

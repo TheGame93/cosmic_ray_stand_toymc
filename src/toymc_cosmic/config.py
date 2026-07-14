@@ -41,11 +41,10 @@ class BeamSourceConfig(SourceModelConfig):
     """Directed beam source settings; travels in `+z` (upstream to downstream).
 
     Attributes:
-        profile: Transverse profile name: `"uniform"`, `"gaussian"`, or `"divergence"`.
+        profile: Transverse profile name: `"uniform"` or `"gaussian"`.
         center: Transverse profile center `(xc, yc)`.
         size: Profile size parameters; meaning depends on `profile`
-            (`uniform`: `[diameter]`, `gaussian`: `[FWHM_x, FWHM_y]`,
-            `divergence`: unvalidated, format not yet defined).
+            (`uniform`: `[diameter]`, `gaussian`: `[FWHM_x, FWHM_y]`).
         flux_hz_per_cm2: `uniform`: the (spatially constant) flux; `gaussian`:
             the average flux over the FWHM ellipse.
     """
@@ -169,7 +168,6 @@ def _read_optional_seed(value: Any) -> int | None:
     return value
 
 
-_BEAM_PROFILES = ("uniform", "gaussian", "divergence")
 _BEAM_PROFILE_SIZE_LENGTHS = {"uniform": 1, "gaussian": 2}
 _OBJECT_SHAPE_SIZE_LENGTHS = {"sphere": 1, "disk": 2, "box": 3}
 
@@ -199,9 +197,7 @@ def _parse_cosmic_source(raw: dict[str, Any]) -> CosmicSourceConfig:
     if model != "cos2":
         raise ConfigError("Only source_model.model = 'cos2' is supported for type 'cosmic'.")
 
-    flux_hz_per_cm2 = _read_float(raw.get("flux_hz_per_cm2"), "source_model.flux_hz_per_cm2")
-    if flux_hz_per_cm2 <= 0.0:
-        raise ConfigError("source_model.flux_hz_per_cm2 must be strictly positive.")
+    flux_hz_per_cm2 = _read_positive_float(raw.get("flux_hz_per_cm2"), "source_model.flux_hz_per_cm2")
 
     return CosmicSourceConfig(
         theta_max=math.radians(theta_max_deg),
@@ -213,19 +209,14 @@ def _parse_cosmic_source(raw: dict[str, Any]) -> CosmicSourceConfig:
 def _parse_beam_source(raw: dict[str, Any]) -> BeamSourceConfig:
     """Parse a `source_model.type: beam` block."""
     profile = raw.get("profile")
-    if profile not in _BEAM_PROFILES:
-        raise ConfigError("source_model.profile must be one of 'uniform', 'gaussian', 'divergence'.")
+    if profile not in _BEAM_PROFILE_SIZE_LENGTHS:
+        raise ConfigError("source_model.profile must be one of 'uniform', 'gaussian'.")
 
     center = _read_float_tuple(raw.get("center"), 2, "source_model.center")
-    size = _read_size_list(raw.get("size"))
-
-    expected_length = _BEAM_PROFILE_SIZE_LENGTHS.get(profile)
-    if expected_length is not None:
-        _validate_size_length(size, expected_length, f"profile {profile!r}")
-
-    flux_hz_per_cm2 = _read_float(raw.get("flux_hz_per_cm2"), "source_model.flux_hz_per_cm2")
-    if flux_hz_per_cm2 <= 0.0:
-        raise ConfigError("source_model.flux_hz_per_cm2 must be strictly positive.")
+    size = _read_float_tuple(
+        raw.get("size"), _BEAM_PROFILE_SIZE_LENGTHS[profile], "source_model.size", positive=True
+    )
+    flux_hz_per_cm2 = _read_positive_float(raw.get("flux_hz_per_cm2"), "source_model.flux_hz_per_cm2")
 
     return BeamSourceConfig(profile=profile, center=center, size=size, flux_hz_per_cm2=flux_hz_per_cm2)
 
@@ -237,37 +228,25 @@ def _parse_object_source(raw: dict[str, Any]) -> ObjectSourceConfig:
         raise ConfigError("source_model.shape must be one of 'sphere', 'disk', 'box'.")
 
     center = _read_float_tuple(raw.get("center"), 3, "source_model.center")
-    size = _read_size_list(raw.get("size"))
-    _validate_size_length(size, _OBJECT_SHAPE_SIZE_LENGTHS[shape], f"shape {shape!r}")
-
-    activity_hz = _read_float(raw.get("activity_hz"), "source_model.activity_hz")
-    if activity_hz <= 0.0:
-        raise ConfigError("source_model.activity_hz must be strictly positive.")
+    size = _read_float_tuple(
+        raw.get("size"), _OBJECT_SHAPE_SIZE_LENGTHS[shape], "source_model.size", positive=True
+    )
+    activity_hz = _read_positive_float(raw.get("activity_hz"), "source_model.activity_hz")
 
     return ObjectSourceConfig(shape=shape, center=center, size=size, activity_hz=activity_hz)
 
 
-def _read_size_list(value: Any) -> tuple[float, ...]:
-    """Read `source_model.size` as a non-empty tuple of floats."""
-    if not isinstance(value, list) or not value:
-        raise ConfigError("source_model.size must be a non-empty list.")
-    return tuple(_read_float(component, "source_model.size") for component in value)
-
-
-def _validate_size_length(size: tuple[float, ...], expected_length: int, context: str) -> None:
-    """Validate that `size` has the expected length and strictly positive components."""
-    if len(size) != expected_length or any(component <= 0.0 for component in size):
-        raise ConfigError(
-            f"source_model.size for {context} must be a list of "
-            f"{expected_length} strictly positive number(s)."
-        )
-
-
-def _read_float_tuple(value: Any, length: int, field_name: str) -> tuple[float, ...]:
+def _read_float_tuple(
+    value: Any, length: int, field_name: str, *, positive: bool = False
+) -> tuple[float, ...]:
     """Read a fixed-length list of numeric values as a tuple of floats."""
     if not isinstance(value, list) or len(value) != length:
         raise ConfigError(f"{field_name} must be a list of {length} number(s).")
-    return tuple(_read_float(component, field_name) for component in value)
+
+    components = tuple(_read_float(component, field_name) for component in value)
+    if positive and any(component <= 0.0 for component in components):
+        raise ConfigError(f"{field_name} must contain only strictly positive numbers.")
+    return components
 
 
 def _parse_monte_carlo(raw_monte_carlo: Any) -> MonteCarloConfig:
@@ -414,6 +393,14 @@ def _read_float(value: Any, field_name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ConfigError(f"{field_name} must be numeric.")
     return float(value)
+
+
+def _read_positive_float(value: Any, field_name: str) -> float:
+    """Read a strictly positive numeric field."""
+    numeric_value = _read_float(value, field_name)
+    if numeric_value <= 0.0:
+        raise ConfigError(f"{field_name} must be strictly positive.")
+    return numeric_value
 
 
 def _read_non_negative_int(value: Any, field_name: str) -> int:
