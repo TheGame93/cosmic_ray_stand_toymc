@@ -189,7 +189,7 @@ This runs the simulation once and then shows only relevant tracks.
 
 The engine is configured through YAML.
 
-<details open>
+<details>
 <summary><strong>Minimal field overview</strong></summary>
 
 - `seed`: fixed integer seed, or `null` to derive it from local time
@@ -204,7 +204,7 @@ The engine is configured through YAML.
 
 </details>
 
-<details>
+<details open>
 <summary><strong>Source models</strong></summary>
 
 `source_model.type` selects one of three particle sources. Only one source
@@ -402,7 +402,7 @@ Color values can be written as:
 
 </details>
 
-<details open>
+<details>
 <summary><strong>What the three track-color fields mean</strong></summary>
 
 In event-display mode, the currently shown track color is chosen from these
