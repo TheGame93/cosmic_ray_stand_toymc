@@ -1,10 +1,11 @@
 seed: 123456
-theta_max_deg: 70
 
-angular_model:
-  type: cos2
-
-flux_hz_per_cm2: 0.01
+source_model:
+  type: object
+  shape: sphere           # sphere | disk | box
+  center: [0.0, 0.0,20.0] # xc, yc, zc
+  size: [2.0]             # sphere: [diameter]; disk: [diameter_xy, wz]; box: [wx, wy, wz]
+  activity_hz: 100000.0   # total emission rate
 
 monte_carlo:
   n_events: 2000000
@@ -62,3 +63,5 @@ gui:
   track_color_fired_given_only: red       # given true in fired mode, numerator false
   track_color_fired_joint: green          # given true in fired mode, numerator true
   line_width: 4.0
+  source_color: orange
+  source_opacity: 0.3

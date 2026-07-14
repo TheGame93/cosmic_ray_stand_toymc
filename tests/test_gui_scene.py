@@ -7,9 +7,11 @@ from unittest import mock
 
 import numpy as np
 
+from toymc_cosmic.config import BeamSourceConfig, CosmicSourceConfig, ObjectSourceConfig
 from toymc_cosmic.geometry import Detector
 from toymc_cosmic.gui.config import GUIConfig
 from toymc_cosmic.gui.scene import (
+    BEAM_VIEW_UP,
     DEFAULT_VIEWPORT_ASPECT_RATIO,
     DEFAULT_WINDOW_HEIGHT_PX,
     DEFAULT_WINDOW_WIDTH_PX,
@@ -23,8 +25,13 @@ from toymc_cosmic.gui.scene import (
     plotter_window_height_px,
     plotter_window_width_px,
     render_detector_colors,
+    render_source_shape,
     show_geometry_only,
+    startup_view_up,
 )
+
+
+_COSMIC_SOURCE_CONFIG = CosmicSourceConfig(theta_max=1.0, model="cos2", flux_hz_per_cm2=0.01)
 
 
 class GuiSceneTests(unittest.TestCase):
@@ -144,7 +151,7 @@ class GuiSceneTests(unittest.TestCase):
         require_pyvista_mock.return_value = FakePyVistaModule()
         detectors = [Detector("T1", [0.0, 0.0, 10.0], [2.0, 2.0, 1.0], 1.0)]
 
-        plotter = build_plotter(detectors, self._gui_config())
+        plotter = build_plotter(detectors, self._gui_config(), _COSMIC_SOURCE_CONFIG)
 
         self.assertEqual(plotter.add_axes_calls, [{}])
 
@@ -157,7 +164,7 @@ class GuiSceneTests(unittest.TestCase):
         require_pyvista_mock.return_value = FakePyVistaModule()
         detectors = [Detector("T1", [0.0, 0.0, 10.0], [2.0, 2.0, 1.0], 1.0)]
 
-        plotter = build_plotter(detectors, self._gui_config(), reserve_bottom_px=90.0)
+        plotter = build_plotter(detectors, self._gui_config(), _COSMIC_SOURCE_CONFIG, reserve_bottom_px=90.0)
 
         self.assertEqual(len(plotter.add_axes_calls), 1)
         viewport = plotter.add_axes_calls[0]["viewport"]
@@ -173,7 +180,7 @@ class GuiSceneTests(unittest.TestCase):
         require_pyvista_mock.return_value = FakePyVistaModule()
         detectors = [Detector("T1", [0.0, 0.0, 10.0], [2.0, 2.0, 1.0], 1.0)]
 
-        plotter = build_plotter(detectors, self._gui_config(), shift_axes_right_px=160.0)
+        plotter = build_plotter(detectors, self._gui_config(), _COSMIC_SOURCE_CONFIG, shift_axes_right_px=160.0)
 
         self.assertEqual(len(plotter.add_axes_calls), 1)
         viewport = plotter.add_axes_calls[0]["viewport"]
@@ -247,6 +254,46 @@ class GuiSceneTests(unittest.TestCase):
         self.assertEqual(plotter.reset_camera_clipping_range_calls, 1)
         self.assertEqual(plotter.show_calls, 1)
 
+    def test_startup_view_up_flips_for_beam_sources(self) -> None:
+        """Beam sources use x-up; other source types keep the default z-up view."""
+        beam_config = BeamSourceConfig(profile="uniform", center=(0.0, 0.0), size=(1.0,), flux_hz_per_cm2=1.0)
+        object_config = ObjectSourceConfig(shape="sphere", center=(0.0, 0.0, 0.0), size=(1.0,), activity_hz=1.0)
+
+        self.assertEqual(startup_view_up(beam_config), BEAM_VIEW_UP)
+        self.assertEqual(startup_view_up(_COSMIC_SOURCE_CONFIG), STARTUP_VIEW_UP)
+        self.assertEqual(startup_view_up(object_config), STARTUP_VIEW_UP)
+
+    @mock.patch("toymc_cosmic.gui.scene._require_pyvista")
+    def test_render_source_shape_renders_mesh_for_object_sources(
+        self,
+        require_pyvista_mock: mock.Mock,
+    ) -> None:
+        """An object source should add exactly one mesh, colored from the GUI config."""
+        require_pyvista_mock.return_value = FakePyVistaModule()
+        plotter = FakePlotter()
+        object_config = ObjectSourceConfig(
+            shape="sphere", center=(0.0, 0.0, 0.0), size=(2.0,), activity_hz=1.0
+        )
+
+        render_source_shape(plotter, object_config, self._gui_config())
+
+        self.assertEqual(len(plotter.mesh_calls), 1)
+        self.assertEqual(plotter.mesh_calls[0]["color"], "orange")
+        self.assertEqual(plotter.mesh_calls[0]["opacity"], 0.25)
+
+    @mock.patch("toymc_cosmic.gui.scene._require_pyvista")
+    def test_render_source_shape_is_a_no_op_for_non_object_sources(
+        self,
+        require_pyvista_mock: mock.Mock,
+    ) -> None:
+        """Cosmic and beam sources must not add a source mesh."""
+        require_pyvista_mock.return_value = FakePyVistaModule()
+        plotter = FakePlotter()
+
+        render_source_shape(plotter, _COSMIC_SOURCE_CONFIG, self._gui_config())
+
+        self.assertEqual(plotter.mesh_calls, [])
+
     def _gui_config(self) -> GUIConfig:
         """Build a compact GUI config used across scene tests."""
         return GUIConfig(
@@ -258,6 +305,8 @@ class GuiSceneTests(unittest.TestCase):
             track_color_fired_given_only="gold",
             track_color_fired_joint="lime",
             line_width=4.0,
+            source_color="orange",
+            source_opacity=0.25,
         )
 
 
@@ -268,6 +317,18 @@ class FakePyVistaModule:
     def Box(bounds: tuple[float, ...]) -> tuple[str, tuple[float, ...]]:
         """Return a simple tuple so tests can assert that a mesh was created."""
         return ("box", bounds)
+
+    @staticmethod
+    def Sphere(radius: float, center: tuple[float, ...]) -> tuple[str, float, tuple[float, ...]]:
+        """Return a simple tuple so tests can assert that a mesh was created."""
+        return ("sphere", radius, center)
+
+    @staticmethod
+    def Cylinder(
+        center: tuple[float, ...], direction: tuple[float, ...], radius: float, height: float
+    ) -> tuple[str, tuple[float, ...], tuple[float, ...], float, float]:
+        """Return a simple tuple so tests can assert that a mesh was created."""
+        return ("cylinder", center, direction, radius, height)
 
     @staticmethod
     def Plotter() -> "FakePlotter":

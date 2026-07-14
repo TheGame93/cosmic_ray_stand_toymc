@@ -27,6 +27,8 @@ class GuiConfigTests(unittest.TestCase):
         self.assertEqual(gui_config.track_color_fired_given_only, "gold")
         self.assertEqual(gui_config.track_color_fired_joint, "lime")
         self.assertEqual(gui_config.line_width, 4.0)
+        self.assertEqual(gui_config.source_color, "orange")
+        self.assertEqual(gui_config.source_opacity, 0.25)
 
     def test_gui_overrides_load(self) -> None:
         """Detector and track colors should load from the raw GUI mapping."""
@@ -43,6 +45,8 @@ class GuiConfigTests(unittest.TestCase):
                   track_color_fired_given_only: [0.8, 0.8, 0.1]
                   track_color_fired_joint: "#00ff00"
                   line_width: 6
+                  source_color: crimson
+                  source_opacity: 0.5
                 """
             )
         )
@@ -55,6 +59,22 @@ class GuiConfigTests(unittest.TestCase):
         self.assertEqual(gui_config.track_color_fired_given_only, (0.8, 0.8, 0.1))
         self.assertEqual(gui_config.track_color_fired_joint, "#00ff00")
         self.assertEqual(gui_config.line_width, 6.0)
+        self.assertEqual(gui_config.source_color, "crimson")
+        self.assertEqual(gui_config.source_opacity, 0.5)
+
+    def test_source_opacity_out_of_range_raises(self) -> None:
+        """gui.source_opacity must stay within the inclusive [0, 1] range."""
+        config = load_config(
+            self._write_config(
+                """
+                gui:
+                  source_opacity: 1.5
+                """
+            )
+        )
+
+        with self.assertRaises(ValueError):
+            load_gui_config(config)
 
     def test_unknown_detector_override_raises(self) -> None:
         """GUI detector color overrides must reference known detector names."""
@@ -74,10 +94,11 @@ class GuiConfigTests(unittest.TestCase):
     def _write_config(self, extra_text: str) -> pathlib.Path:
         """Write a minimal config file with optional extra GUI content."""
         base_config_text = """
-        theta_max_deg: 80.0
-        angular_model:
-          type: cos2
-        flux_hz_per_cm2: 0.01
+        source_model:
+          type: cosmic
+          model: cos2
+          theta_max_deg: 80.0
+          flux_hz_per_cm2: 0.01
         monte_carlo:
           n_events: 10
         detectors:

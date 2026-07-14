@@ -1,34 +1,41 @@
-"""Tests for track generation."""
+"""Tests for the Tracks container."""
 
 from __future__ import annotations
 
-import math
 import unittest
 
 import numpy as np
 
-from toymc_cosmic.angular import Cos2AngularModel
-from toymc_cosmic.geometry import Detector, generation_region, reference_z
-from toymc_cosmic.tracks import generate_tracks
+from toymc_cosmic.tracks import Tracks
 
 
-class TrackTests(unittest.TestCase):
-    """Check generation-region usage and direction normalization."""
+class TracksTests(unittest.TestCase):
+    """Check the Tracks dataclass's shape validation."""
 
-    def test_generated_tracks_respect_region_and_direction_conventions(self) -> None:
-        """Origins must lie in the generation rectangle and directions must be unit length."""
-        detectors = [Detector("T1", [0.0, 0.0, 10.0], [2.0, 2.0, 2.0], 1.0)]
-        rng = np.random.default_rng(10)
+    def test_matching_shapes_construct(self) -> None:
+        """Origins and directions with matching event counts should construct fine."""
+        origins = np.zeros((3, 3))
+        directions = np.zeros((3, 3))
+        tracks = Tracks(origins=origins, directions=directions)
+        self.assertEqual(tracks.origins.shape, (3, 3))
+        self.assertEqual(tracks.directions.shape, (3, 3))
 
-        tracks = generate_tracks(500, detectors, math.radians(80.0), Cos2AngularModel(), rng)
-        x_min, x_max, y_min, y_max, _ = generation_region(detectors, math.radians(80.0))
+    def test_wrong_origin_width_raises(self) -> None:
+        """Origins must have exactly 3 columns."""
+        with self.assertRaises(ValueError):
+            Tracks(origins=np.zeros((3, 2)), directions=np.zeros((3, 3)))
 
-        self.assertTrue(np.all(tracks.origins[:, 0] >= x_min))
-        self.assertTrue(np.all(tracks.origins[:, 0] <= x_max))
-        self.assertTrue(np.all(tracks.origins[:, 1] >= y_min))
-        self.assertTrue(np.all(tracks.origins[:, 1] <= y_max))
-        self.assertTrue(np.allclose(tracks.origins[:, 2], reference_z(detectors)))
+    def test_wrong_direction_width_raises(self) -> None:
+        """Directions must have exactly 3 columns."""
+        with self.assertRaises(ValueError):
+            Tracks(origins=np.zeros((3, 3)), directions=np.zeros((3, 2)))
 
-        direction_norms = np.linalg.norm(tracks.directions, axis=1)
-        self.assertTrue(np.allclose(direction_norms, 1.0))
-        self.assertTrue(np.all(tracks.directions[:, 2] <= 0.0))
+    def test_mismatched_event_counts_raise(self) -> None:
+        """Origins and directions must share the same event count."""
+        with self.assertRaises(ValueError):
+            Tracks(origins=np.zeros((3, 3)), directions=np.zeros((4, 3)))
+
+    def test_non_2d_origins_raise(self) -> None:
+        """Origins must be a 2D array."""
+        with self.assertRaises(ValueError):
+            Tracks(origins=np.zeros(3), directions=np.zeros((1, 3)))

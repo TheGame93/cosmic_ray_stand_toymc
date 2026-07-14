@@ -217,4 +217,6 @@ class GuiEventStateTests(unittest.TestCase):
             track_color_fired_given_only="gold",
             track_color_fired_joint="lime",
             line_width=4.0,
+            source_color="orange",
+            source_opacity=0.25,
         )

@@ -17,11 +17,61 @@ class ConfigError(ValueError):
     """Raised when the YAML configuration is missing or contains invalid data."""
 
 
-@dataclass(frozen=True)
-class AngularModelConfig:
-    """Angular model settings stored in the YAML file."""
+class SourceModelConfig:
+    """Marker base for the discriminated `source_model` config union."""
 
-    type: str
+
+@dataclass(frozen=True)
+class CosmicSourceConfig(SourceModelConfig):
+    """Cosmic-ray source settings: zenith-angle sampling over a downward cone.
+
+    Attributes:
+        theta_max: Maximum zenith angle in radians.
+        model: Angular model name; only `"cos2"` is supported today.
+        flux_hz_per_cm2: Total downward flux over the simulated angular cone.
+    """
+
+    theta_max: float
+    model: str
+    flux_hz_per_cm2: float
+
+
+@dataclass(frozen=True)
+class BeamSourceConfig(SourceModelConfig):
+    """Directed beam source settings; travels in `+z` (upstream to downstream).
+
+    Attributes:
+        profile: Transverse profile name: `"uniform"`, `"gaussian"`, or `"divergence"`.
+        center: Transverse profile center `(xc, yc)`.
+        size: Profile size parameters; meaning depends on `profile`
+            (`uniform`: `[diameter]`, `gaussian`: `[FWHM_x, FWHM_y]`,
+            `divergence`: unvalidated, format not yet defined).
+        flux_hz_per_cm2: `uniform`: the (spatially constant) flux; `gaussian`:
+            the average flux over the FWHM ellipse.
+    """
+
+    profile: str
+    center: tuple[float, float]
+    size: tuple[float, ...]
+    flux_hz_per_cm2: float
+
+
+@dataclass(frozen=True)
+class ObjectSourceConfig(SourceModelConfig):
+    """Radioactive point/volume source settings; emits isotropically over 4*pi.
+
+    Attributes:
+        shape: Volume shape: `"sphere"`, `"disk"`, or `"box"`.
+        center: Volume center `(xc, yc, zc)`.
+        size: Shape size parameters (`sphere`: `[diameter]`, `disk`:
+            `[diameter_xy, wz]`, `box`: `[wx, wy, wz]`).
+        activity_hz: Total emission rate in Hz.
+    """
+
+    shape: str
+    center: tuple[float, float, float]
+    size: tuple[float, ...]
+    activity_hz: float
 
 
 @dataclass(frozen=True)
@@ -54,9 +104,8 @@ class Config:
 
     Attributes:
         seed: Optional fixed seed. `None` means resolve from local time at runtime.
-        theta_max: Maximum zenith angle in radians.
-        angular_model: Angular model settings.
-        flux_hz_per_cm2: Total downward flux over the simulated angular cone.
+        source_model: Validated source settings; one of `CosmicSourceConfig`,
+            `BeamSourceConfig`, or `ObjectSourceConfig`.
         monte_carlo: Monte Carlo controls such as event count.
         detectors: Physical detector definitions.
         logic_expressions: Expressions whose rates should be reported.
@@ -66,9 +115,7 @@ class Config:
     """
 
     seed: int | None
-    theta_max: float
-    angular_model: AngularModelConfig
-    flux_hz_per_cm2: float
+    source_model: SourceModelConfig
     monte_carlo: MonteCarloConfig
     detectors: list[Detector]
     logic_expressions: list[str]
@@ -91,15 +138,7 @@ def load_config(path: str | pathlib.Path) -> Config:
         raise ConfigError("Top-level YAML content must be a mapping.")
 
     seed = _read_optional_seed(raw_data.get("seed"))
-    theta_max_deg = _read_float(raw_data.get("theta_max_deg"), "theta_max_deg")
-    if not 0.0 < theta_max_deg < 90.0:
-        raise ConfigError("theta_max_deg must be between 0 and 90.")
-    theta_max = math.radians(theta_max_deg)
-
-    angular_model = _parse_angular_model(raw_data.get("angular_model"))
-    flux_hz_per_cm2 = _read_float(raw_data.get("flux_hz_per_cm2"), "flux_hz_per_cm2")
-    if flux_hz_per_cm2 <= 0.0:
-        raise ConfigError("flux_hz_per_cm2 must be strictly positive.")
+    source_model = _parse_source_model(raw_data.get("source_model"))
 
     monte_carlo = _parse_monte_carlo(raw_data.get("monte_carlo"))
     detectors = _parse_detectors(raw_data.get("detectors"))
@@ -111,9 +150,7 @@ def load_config(path: str | pathlib.Path) -> Config:
 
     return Config(
         seed=seed,
-        theta_max=theta_max,
-        angular_model=angular_model,
-        flux_hz_per_cm2=flux_hz_per_cm2,
+        source_model=source_model,
         monte_carlo=monte_carlo,
         detectors=detectors,
         logic_expressions=logic_expressions,
@@ -132,15 +169,105 @@ def _read_optional_seed(value: Any) -> int | None:
     return value
 
 
-def _parse_angular_model(raw_angular_model: Any) -> AngularModelConfig:
-    """Parse angular model settings."""
-    if not isinstance(raw_angular_model, dict):
-        raise ConfigError("angular_model must be a mapping.")
+_BEAM_PROFILES = ("uniform", "gaussian", "divergence")
+_BEAM_PROFILE_SIZE_LENGTHS = {"uniform": 1, "gaussian": 2}
+_OBJECT_SHAPE_SIZE_LENGTHS = {"sphere": 1, "disk": 2, "box": 3}
 
-    angular_type = raw_angular_model.get("type")
-    if angular_type != "cos2":
-        raise ConfigError("Only angular_model.type = 'cos2' is supported in the engine.")
-    return AngularModelConfig(type=angular_type)
+
+def _parse_source_model(raw_source_model: Any) -> SourceModelConfig:
+    """Parse and validate the `source_model` block; returns the matching config dataclass."""
+    if not isinstance(raw_source_model, dict):
+        raise ConfigError("source_model must be a mapping.")
+
+    source_type = raw_source_model.get("type")
+    if source_type == "cosmic":
+        return _parse_cosmic_source(raw_source_model)
+    if source_type == "beam":
+        return _parse_beam_source(raw_source_model)
+    if source_type == "object":
+        return _parse_object_source(raw_source_model)
+    raise ConfigError("source_model.type must be one of 'cosmic', 'beam', 'object'.")
+
+
+def _parse_cosmic_source(raw: dict[str, Any]) -> CosmicSourceConfig:
+    """Parse a `source_model.type: cosmic` block."""
+    theta_max_deg = _read_float(raw.get("theta_max_deg"), "source_model.theta_max_deg")
+    if not 0.0 < theta_max_deg < 90.0:
+        raise ConfigError("source_model.theta_max_deg must be between 0 and 90.")
+
+    model = raw.get("model")
+    if model != "cos2":
+        raise ConfigError("Only source_model.model = 'cos2' is supported for type 'cosmic'.")
+
+    flux_hz_per_cm2 = _read_float(raw.get("flux_hz_per_cm2"), "source_model.flux_hz_per_cm2")
+    if flux_hz_per_cm2 <= 0.0:
+        raise ConfigError("source_model.flux_hz_per_cm2 must be strictly positive.")
+
+    return CosmicSourceConfig(
+        theta_max=math.radians(theta_max_deg),
+        model=model,
+        flux_hz_per_cm2=flux_hz_per_cm2,
+    )
+
+
+def _parse_beam_source(raw: dict[str, Any]) -> BeamSourceConfig:
+    """Parse a `source_model.type: beam` block."""
+    profile = raw.get("profile")
+    if profile not in _BEAM_PROFILES:
+        raise ConfigError("source_model.profile must be one of 'uniform', 'gaussian', 'divergence'.")
+
+    center = _read_float_tuple(raw.get("center"), 2, "source_model.center")
+    size = _read_size_list(raw.get("size"))
+
+    expected_length = _BEAM_PROFILE_SIZE_LENGTHS.get(profile)
+    if expected_length is not None:
+        _validate_size_length(size, expected_length, f"profile {profile!r}")
+
+    flux_hz_per_cm2 = _read_float(raw.get("flux_hz_per_cm2"), "source_model.flux_hz_per_cm2")
+    if flux_hz_per_cm2 <= 0.0:
+        raise ConfigError("source_model.flux_hz_per_cm2 must be strictly positive.")
+
+    return BeamSourceConfig(profile=profile, center=center, size=size, flux_hz_per_cm2=flux_hz_per_cm2)
+
+
+def _parse_object_source(raw: dict[str, Any]) -> ObjectSourceConfig:
+    """Parse a `source_model.type: object` block."""
+    shape = raw.get("shape")
+    if shape not in _OBJECT_SHAPE_SIZE_LENGTHS:
+        raise ConfigError("source_model.shape must be one of 'sphere', 'disk', 'box'.")
+
+    center = _read_float_tuple(raw.get("center"), 3, "source_model.center")
+    size = _read_size_list(raw.get("size"))
+    _validate_size_length(size, _OBJECT_SHAPE_SIZE_LENGTHS[shape], f"shape {shape!r}")
+
+    activity_hz = _read_float(raw.get("activity_hz"), "source_model.activity_hz")
+    if activity_hz <= 0.0:
+        raise ConfigError("source_model.activity_hz must be strictly positive.")
+
+    return ObjectSourceConfig(shape=shape, center=center, size=size, activity_hz=activity_hz)
+
+
+def _read_size_list(value: Any) -> tuple[float, ...]:
+    """Read `source_model.size` as a non-empty tuple of floats."""
+    if not isinstance(value, list) or not value:
+        raise ConfigError("source_model.size must be a non-empty list.")
+    return tuple(_read_float(component, "source_model.size") for component in value)
+
+
+def _validate_size_length(size: tuple[float, ...], expected_length: int, context: str) -> None:
+    """Validate that `size` has the expected length and strictly positive components."""
+    if len(size) != expected_length or any(component <= 0.0 for component in size):
+        raise ConfigError(
+            f"source_model.size for {context} must be a list of "
+            f"{expected_length} strictly positive number(s)."
+        )
+
+
+def _read_float_tuple(value: Any, length: int, field_name: str) -> tuple[float, ...]:
+    """Read a fixed-length list of numeric values as a tuple of floats."""
+    if not isinstance(value, list) or len(value) != length:
+        raise ConfigError(f"{field_name} must be a list of {length} number(s).")
+    return tuple(_read_float(component, field_name) for component in value)
 
 
 def _parse_monte_carlo(raw_monte_carlo: Any) -> MonteCarloConfig:

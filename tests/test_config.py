@@ -7,7 +7,13 @@ import tempfile
 import textwrap
 import unittest
 
-from toymc_cosmic.config import ConfigError, load_config
+from toymc_cosmic.config import (
+    BeamSourceConfig,
+    ConfigError,
+    CosmicSourceConfig,
+    ObjectSourceConfig,
+    load_config,
+)
 
 
 class ConfigTests(unittest.TestCase):
@@ -17,10 +23,11 @@ class ConfigTests(unittest.TestCase):
         """A valid configuration file should load into a Config object."""
         config_text = """
         seed: 1
-        theta_max_deg: 80.0
-        angular_model:
-          type: cos2
-        flux_hz_per_cm2: 0.01
+        source_model:
+          type: cosmic
+          model: cos2
+          theta_max_deg: 80.0
+          flux_hz_per_cm2: 0.01
         monte_carlo:
           n_events: 100
         detectors:
@@ -39,14 +46,16 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.logic_expressions, ["T1"])
         self.assertEqual(config.output.detector_rate_decimals, 1)
         self.assertEqual(config.output.logic_rate_decimals, 1)
+        self.assertIsInstance(config.source_model, CosmicSourceConfig)
 
     def test_output_precision_settings_load(self) -> None:
         """Output precision settings should load from the YAML file."""
         config_text = """
-        theta_max_deg: 80.0
-        angular_model:
-          type: cos2
-        flux_hz_per_cm2: 0.01
+        source_model:
+          type: cosmic
+          model: cos2
+          theta_max_deg: 80.0
+          flux_hz_per_cm2: 0.01
         monte_carlo:
           n_events: 100
         output:
@@ -66,10 +75,11 @@ class ConfigTests(unittest.TestCase):
     def test_negative_output_precision_raises(self) -> None:
         """Output precision values must be non-negative."""
         config_text = """
-        theta_max_deg: 80.0
-        angular_model:
-          type: cos2
-        flux_hz_per_cm2: 0.01
+        source_model:
+          type: cosmic
+          model: cos2
+          theta_max_deg: 80.0
+          flux_hz_per_cm2: 0.01
         monte_carlo:
           n_events: 100
         output:
@@ -87,10 +97,11 @@ class ConfigTests(unittest.TestCase):
     def test_non_integer_output_precision_raises(self) -> None:
         """Output precision values must be integers."""
         config_text = """
-        theta_max_deg: 80.0
-        angular_model:
-          type: cos2
-        flux_hz_per_cm2: 0.01
+        source_model:
+          type: cosmic
+          model: cos2
+          theta_max_deg: 80.0
+          flux_hz_per_cm2: 0.01
         monte_carlo:
           n_events: 100
         output:
@@ -108,10 +119,11 @@ class ConfigTests(unittest.TestCase):
     def test_conditional_without_mode_loads(self) -> None:
         """Conditionals should load without a mode field."""
         config_text = """
-        theta_max_deg: 80.0
-        angular_model:
-          type: cos2
-        flux_hz_per_cm2: 0.01
+        source_model:
+          type: cosmic
+          model: cos2
+          theta_max_deg: 80.0
+          flux_hz_per_cm2: 0.01
         monte_carlo:
           n_events: 100
         detectors:
@@ -133,10 +145,11 @@ class ConfigTests(unittest.TestCase):
     def test_conditional_with_mode_raises(self) -> None:
         """Conditionals must not define mode anymore."""
         config_text = """
-        theta_max_deg: 80.0
-        angular_model:
-          type: cos2
-        flux_hz_per_cm2: 0.01
+        source_model:
+          type: cosmic
+          model: cos2
+          theta_max_deg: 80.0
+          flux_hz_per_cm2: 0.01
         monte_carlo:
           n_events: 100
         detectors:
@@ -158,10 +171,11 @@ class ConfigTests(unittest.TestCase):
     def test_duplicate_detector_names_raise(self) -> None:
         """Duplicate detector names must be rejected."""
         config_text = """
-        theta_max_deg: 80.0
-        angular_model:
-          type: cos2
-        flux_hz_per_cm2: 0.01
+        source_model:
+          type: cosmic
+          model: cos2
+          theta_max_deg: 80.0
+          flux_hz_per_cm2: 0.01
         monte_carlo:
           n_events: 100
         detectors:
@@ -181,10 +195,11 @@ class ConfigTests(unittest.TestCase):
     def test_unknown_detector_name_in_logic_raises(self) -> None:
         """Logic expressions must reference known detectors only."""
         config_text = """
-        theta_max_deg: 80.0
-        angular_model:
-          type: cos2
-        flux_hz_per_cm2: 0.01
+        source_model:
+          type: cosmic
+          model: cos2
+          theta_max_deg: 80.0
+          flux_hz_per_cm2: 0.01
         monte_carlo:
           n_events: 100
         detectors:
@@ -195,6 +210,319 @@ class ConfigTests(unittest.TestCase):
         logic:
           expressions:
             - "T2"
+        """
+
+        with self.assertRaises(ConfigError):
+            load_config(self._write_config(config_text))
+
+    def test_missing_source_model_raises(self) -> None:
+        """A missing source_model block must be rejected."""
+        config_text = """
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        with self.assertRaises(ConfigError):
+            load_config(self._write_config(config_text))
+
+    def test_unknown_source_model_type_raises(self) -> None:
+        """An unrecognized source_model.type must be rejected."""
+        config_text = """
+        source_model:
+          type: supernova
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        with self.assertRaises(ConfigError):
+            load_config(self._write_config(config_text))
+
+    def test_cosmic_theta_max_out_of_range_raises(self) -> None:
+        """source_model.theta_max_deg must be strictly between 0 and 90."""
+        config_text = """
+        source_model:
+          type: cosmic
+          model: cos2
+          theta_max_deg: 90.0
+          flux_hz_per_cm2: 0.01
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        with self.assertRaises(ConfigError):
+            load_config(self._write_config(config_text))
+
+    def test_cosmic_unsupported_model_raises(self) -> None:
+        """source_model.model must be 'cos2' for cosmic sources."""
+        config_text = """
+        source_model:
+          type: cosmic
+          model: flat
+          theta_max_deg: 80.0
+          flux_hz_per_cm2: 0.01
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        with self.assertRaises(ConfigError):
+            load_config(self._write_config(config_text))
+
+    def test_beam_uniform_loads(self) -> None:
+        """A valid uniform beam source should load with a 1-element size."""
+        config_text = """
+        source_model:
+          type: beam
+          profile: uniform
+          center: [0.0, 1.0]
+          size: [10.0]
+          flux_hz_per_cm2: 100.0
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        config = load_config(self._write_config(config_text))
+        self.assertIsInstance(config.source_model, BeamSourceConfig)
+        assert isinstance(config.source_model, BeamSourceConfig)
+        self.assertEqual(config.source_model.profile, "uniform")
+        self.assertEqual(config.source_model.center, (0.0, 1.0))
+        self.assertEqual(config.source_model.size, (10.0,))
+
+    def test_beam_gaussian_loads(self) -> None:
+        """A valid gaussian beam source should load with a 2-element size."""
+        config_text = """
+        source_model:
+          type: beam
+          profile: gaussian
+          center: [0.0, 0.0]
+          size: [10.0, 8.0]
+          flux_hz_per_cm2: 100.0
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        config = load_config(self._write_config(config_text))
+        assert isinstance(config.source_model, BeamSourceConfig)
+        self.assertEqual(config.source_model.size, (10.0, 8.0))
+
+    def test_beam_uniform_wrong_size_length_raises(self) -> None:
+        """A uniform beam profile must have exactly one size element."""
+        config_text = """
+        source_model:
+          type: beam
+          profile: uniform
+          center: [0.0, 0.0]
+          size: [10.0, 8.0]
+          flux_hz_per_cm2: 100.0
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        with self.assertRaises(ConfigError):
+            load_config(self._write_config(config_text))
+
+    def test_beam_divergence_accepted_with_unvalidated_size(self) -> None:
+        """The divergence profile is accepted at parse time even though it's unimplemented."""
+        config_text = """
+        source_model:
+          type: beam
+          profile: divergence
+          center: [0.0, 0.0]
+          size: [1.0, 2.0, 3.0, 4.0]
+          flux_hz_per_cm2: 100.0
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        config = load_config(self._write_config(config_text))
+        assert isinstance(config.source_model, BeamSourceConfig)
+        self.assertEqual(config.source_model.profile, "divergence")
+        self.assertEqual(config.source_model.size, (1.0, 2.0, 3.0, 4.0))
+
+    def test_beam_unsupported_profile_raises(self) -> None:
+        """Beam profile must be one of the recognized names."""
+        config_text = """
+        source_model:
+          type: beam
+          profile: pencil
+          center: [0.0, 0.0]
+          size: [10.0]
+          flux_hz_per_cm2: 100.0
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        with self.assertRaises(ConfigError):
+            load_config(self._write_config(config_text))
+
+    def test_object_sphere_loads(self) -> None:
+        """A valid sphere object source should load with a 1-element size."""
+        config_text = """
+        source_model:
+          type: object
+          shape: sphere
+          center: [0.0, 0.0, -5.0]
+          size: [2.0]
+          activity_hz: 1000.0
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        config = load_config(self._write_config(config_text))
+        self.assertIsInstance(config.source_model, ObjectSourceConfig)
+        assert isinstance(config.source_model, ObjectSourceConfig)
+        self.assertEqual(config.source_model.shape, "sphere")
+        self.assertEqual(config.source_model.center, (0.0, 0.0, -5.0))
+        self.assertEqual(config.source_model.size, (2.0,))
+        self.assertEqual(config.source_model.activity_hz, 1000.0)
+
+    def test_object_disk_and_box_size_lengths(self) -> None:
+        """disk needs a 2-element size and box needs a 3-element size."""
+        disk_text = """
+        source_model:
+          type: object
+          shape: disk
+          center: [0.0, 0.0, 0.0]
+          size: [4.0, 1.0]
+          activity_hz: 1000.0
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+        box_text = """
+        source_model:
+          type: object
+          shape: box
+          center: [0.0, 0.0, 0.0]
+          size: [4.0, 1.0, 2.0]
+          activity_hz: 1000.0
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        disk_config = load_config(self._write_config(disk_text))
+        box_config = load_config(self._write_config(box_text))
+        assert isinstance(disk_config.source_model, ObjectSourceConfig)
+        assert isinstance(box_config.source_model, ObjectSourceConfig)
+        self.assertEqual(disk_config.source_model.size, (4.0, 1.0))
+        self.assertEqual(box_config.source_model.size, (4.0, 1.0, 2.0))
+
+    def test_object_wrong_size_length_raises(self) -> None:
+        """A sphere object source must have exactly one size element."""
+        config_text = """
+        source_model:
+          type: object
+          shape: sphere
+          center: [0.0, 0.0, 0.0]
+          size: [2.0, 3.0]
+          activity_hz: 1000.0
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        with self.assertRaises(ConfigError):
+            load_config(self._write_config(config_text))
+
+    def test_object_unsupported_shape_raises(self) -> None:
+        """Object shape must be one of the recognized names."""
+        config_text = """
+        source_model:
+          type: object
+          shape: cube
+          center: [0.0, 0.0, 0.0]
+          size: [2.0]
+          activity_hz: 1000.0
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
+        """
+
+        with self.assertRaises(ConfigError):
+            load_config(self._write_config(config_text))
+
+    def test_object_non_positive_activity_raises(self) -> None:
+        """source_model.activity_hz must be strictly positive."""
+        config_text = """
+        source_model:
+          type: object
+          shape: sphere
+          center: [0.0, 0.0, 0.0]
+          size: [2.0]
+          activity_hz: 0.0
+        monte_carlo:
+          n_events: 100
+        detectors:
+          - name: T1
+            center: [0, 0, 10]
+            size: [2, 2, 1]
+            efficiency: 0.9
         """
 
         with self.assertRaises(ConfigError):

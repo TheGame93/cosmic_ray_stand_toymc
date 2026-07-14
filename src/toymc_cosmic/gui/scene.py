@@ -7,13 +7,14 @@ from typing import Any
 
 import numpy as np
 
-from ..config import Config
+from ..config import BeamSourceConfig, Config, ObjectSourceConfig, SourceModelConfig
 from ..geometry import Detector
 from .config import GUIConfig, load_gui_config
 
 
 STARTUP_VIEW_DIRECTION = np.array([1.0, 1.0, 1.0], dtype=float)
 STARTUP_VIEW_UP = (0.0, 0.0, 1.0)
+BEAM_VIEW_UP = (1.0, 0.0, 0.0)
 MIN_CAMERA_DISTANCE = 5.0
 CAMERA_FRAME_PADDING = 1.08
 DEFAULT_VIEWPORT_ASPECT_RATIO = 4.0 / 3.0
@@ -24,18 +25,33 @@ DEFAULT_WINDOW_WIDTH_PX = 1600.0
 def show_geometry_only(config: Config) -> None:
     """Open a static detector-only 3D scene without running the Monte Carlo."""
     gui_config = load_gui_config(config)
-    plotter = build_plotter(config.detectors, gui_config)
+    plotter = build_plotter(config.detectors, gui_config, config.source_model)
     startup_camera_position = build_startup_camera_position(
         detector_scene_bounds(config.detectors),
         viewport_aspect_ratio=plotter_viewport_aspect_ratio(plotter),
+        view_up=startup_view_up(config.source_model),
     )
     apply_camera_position(plotter, startup_camera_position)
     plotter.show()
 
 
+def startup_view_up(source_config: SourceModelConfig) -> tuple[float, float, float]:
+    """Return the startup camera's up vector for a source type.
+
+    `beam` sources travel horizontally along `z`, so the default view flips
+    to `x` pointing up (the `yz` plane becomes the horizontal ground plane,
+    with the beam entering from the side) instead of the usual `z`-up view
+    used for downward-traveling `cosmic`/`object` sources.
+    """
+    if isinstance(source_config, BeamSourceConfig):
+        return BEAM_VIEW_UP
+    return STARTUP_VIEW_UP
+
+
 def build_plotter(
     detectors: list[Detector],
     gui_config: GUIConfig,
+    source_config: SourceModelConfig,
     *,
     reserve_bottom_px: float = 0.0,
     shift_axes_right_px: float = 0.0,
@@ -75,7 +91,42 @@ def build_plotter(
         plotter.add_axes()
 
     render_detector_colors(plotter, detectors, gui_config, {})
+    render_source_shape(plotter, source_config, gui_config)
     return plotter
+
+
+def render_source_shape(plotter: Any, source_config: SourceModelConfig, gui_config: GUIConfig) -> None:
+    """Render the source volume once for `object`-type sources; no-op otherwise."""
+    if not isinstance(source_config, ObjectSourceConfig):
+        return
+
+    pv = _require_pyvista()
+    center = source_config.center
+    size = source_config.size
+
+    if source_config.shape == "sphere":
+        mesh = pv.Sphere(radius=0.5 * size[0], center=center)
+    elif source_config.shape == "disk":
+        mesh = pv.Cylinder(center=center, direction=(0.0, 0.0, 1.0), radius=0.5 * size[0], height=size[1])
+    else:
+        mesh = pv.Box(
+            bounds=(
+                center[0] - 0.5 * size[0],
+                center[0] + 0.5 * size[0],
+                center[1] - 0.5 * size[1],
+                center[1] + 0.5 * size[1],
+                center[2] - 0.5 * size[2],
+                center[2] + 0.5 * size[2],
+            )
+        )
+
+    plotter.add_mesh(
+        mesh,
+        color=gui_config.source_color,
+        opacity=gui_config.source_opacity,
+        name="source_shape",
+        reset_camera=False,
+    )
 
 
 def compute_axes_viewport(
@@ -215,6 +266,7 @@ def build_startup_camera_position(
     scene_bounds: tuple[float, float, float, float, float, float],
     *,
     viewport_aspect_ratio: float = DEFAULT_VIEWPORT_ASPECT_RATIO,
+    view_up: tuple[float, float, float] = STARTUP_VIEW_UP,
 ) -> tuple[tuple[float, float, float], tuple[float, float, float], tuple[float, float, float]]:
     """Build a deterministic startup camera with direction parallel to `(1, 1, 1)`."""
     x_min, x_max, y_min, y_max, z_min, z_max = scene_bounds
@@ -237,8 +289,8 @@ def build_startup_camera_position(
 
     safe_aspect_ratio = max(float(viewport_aspect_ratio), 1.0e-6)
     direction = STARTUP_VIEW_DIRECTION / np.linalg.norm(STARTUP_VIEW_DIRECTION)
-    view_up = np.array(STARTUP_VIEW_UP, dtype=float)
-    view_right = np.cross(direction, view_up)
+    view_up_array = np.array(view_up, dtype=float)
+    view_right = np.cross(direction, view_up_array)
     view_right = view_right / np.linalg.norm(view_right)
     view_up_orthogonal = np.cross(view_right, direction)
     view_up_orthogonal = view_up_orthogonal / np.linalg.norm(view_up_orthogonal)
@@ -267,7 +319,7 @@ def build_startup_camera_position(
     return (
         tuple(float(component) for component in camera_position),
         tuple(float(component) for component in scene_center),
-        STARTUP_VIEW_UP,
+        view_up,
     )
 
 

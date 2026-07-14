@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import pathlib
 import tempfile
 import textwrap
@@ -10,12 +11,21 @@ import unittest
 import numpy as np
 
 from toymc_cosmic.config import load_config
+from toymc_cosmic.geometry import generation_region
 from toymc_cosmic.logic import evaluate
 from toymc_cosmic.simulation import PROGRESS_UPDATE_INTERVAL, run_simulation
 
 
 class SimulationTests(unittest.TestCase):
     """Check end-to-end simulation sanity conditions."""
+
+    def test_total_rate_hz_matches_flux_times_generation_area(self) -> None:
+        """SimulationResult.total_rate_hz must match the cosmic source's flux * area_gen."""
+        config = load_config(self._write_config())
+        result = run_simulation(config)
+
+        _, _, _, _, area_gen = generation_region(config.detectors, math.radians(80.0))
+        self.assertAlmostEqual(result.total_rate_hz, 0.01 * area_gen)
 
     def test_fired_events_are_subset_of_crossed_events(self) -> None:
         """Detector response must never create fired events without a crossing."""
@@ -68,10 +78,11 @@ class SimulationTests(unittest.TestCase):
         """Write a small but non-trivial simulation config file."""
         config_text = f"""
         seed: 11
-        theta_max_deg: 80.0
-        angular_model:
-          type: cos2
-        flux_hz_per_cm2: 0.01
+        source_model:
+          type: cosmic
+          model: cos2
+          theta_max_deg: 80.0
+          flux_hz_per_cm2: 0.01
         monte_carlo:
           n_events: {n_events}
         detectors:

@@ -8,11 +8,11 @@ from typing import Callable
 
 import numpy as np
 
-from .angular import Cos2AngularModel
 from .config import Config
-from .geometry import Detector, generation_region, intersect
+from .geometry import Detector, intersect
 from .response import apply_response
-from .tracks import Tracks, generate_tracks
+from .source import build_source_model
+from .tracks import Tracks
 
 
 ProgressCallback = Callable[[int, int, float], None]
@@ -28,9 +28,7 @@ class SimulationResult:
         crossed: Per-detector geometric crossing arrays keyed by detector name.
         fired: Per-detector fired-response arrays keyed by detector name.
         detectors: Detector definitions used in the run.
-        area_gen: Generation area in cm^2.
-        flux: Total downward flux over the simulated angular cone.
-        theta_max: Maximum zenith angle in radians.
+        total_rate_hz: Total physical event rate the source's sampling represents, in Hz.
         seed: Resolved random seed used for the run.
         n_events: Number of generated events.
     """
@@ -39,9 +37,7 @@ class SimulationResult:
     crossed: dict[str, np.ndarray]
     fired: dict[str, np.ndarray]
     detectors: list[Detector]
-    area_gen: float
-    flux: float
-    theta_max: float
+    total_rate_hz: float
     seed: int
     n_events: int
 
@@ -61,7 +57,7 @@ def run_simulation(
     seed = config.seed if config.seed is not None else int(time.time() * 1000)
     rng = np.random.default_rng(seed)
 
-    angular_model = _build_angular_model(config)
+    source_model = build_source_model(config.source_model)
     efficiencies = np.array([detector.efficiency for detector in config.detectors], dtype=float)
 
     track_origin_chunks: list[np.ndarray] = []
@@ -76,13 +72,7 @@ def run_simulation(
         remaining_events = total_events - chunk_start
         chunk_size = min(PROGRESS_UPDATE_INTERVAL, remaining_events)
 
-        chunk_tracks = generate_tracks(
-            count=chunk_size,
-            detectors=config.detectors,
-            theta_max=config.theta_max,
-            angular_model=angular_model,
-            rng=rng,
-        )
+        chunk_tracks = source_model.generate(chunk_size, config.detectors, rng)
         chunk_crossed = intersect(chunk_tracks.origins, chunk_tracks.directions, config.detectors)
         chunk_fired = apply_response(chunk_crossed, efficiencies, rng)
 
@@ -116,28 +106,12 @@ def run_simulation(
         for index, detector_name in enumerate(detector_names)
     }
 
-    _, _, _, _, area_gen = generation_region(config.detectors, config.theta_max)
-
     return SimulationResult(
         tracks=tracks,
         crossed=crossed,
         fired=fired,
         detectors=config.detectors,
-        area_gen=area_gen,
-        flux=config.flux_hz_per_cm2,
-        theta_max=config.theta_max,
+        total_rate_hz=source_model.total_rate_hz(config.detectors),
         seed=seed,
         n_events=config.monte_carlo.n_events,
     )
-
-
-def _build_angular_model(config: Config) -> Cos2AngularModel:
-    """Build the configured angular model.
-
-    The engine currently supports only the default cos^2 model, but keeping this
-    helper separate makes the future extension path easier to follow.
-    """
-
-    if config.angular_model.type == "cos2":
-        return Cos2AngularModel()
-    raise ValueError(f"Unsupported angular model type: {config.angular_model.type}")

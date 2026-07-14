@@ -28,6 +28,8 @@ class GUIConfig:
     track_color_fired_given_only: ColorValue
     track_color_fired_joint: ColorValue
     line_width: float
+    source_color: ColorValue
+    source_opacity: float
 
     def detector_color(self, detector_name: str) -> ColorValue:
         """Return the configured base color for one detector."""
@@ -80,6 +82,8 @@ def load_gui_config(config: Config) -> GUIConfig:
             "gui.track_color_fired_joint",
         ),
         line_width=_read_positive_float(raw_gui.get("line_width", 4.0), "gui.line_width"),
+        source_color=_read_color(raw_gui.get("source_color", "orange"), "gui.source_color"),
+        source_opacity=_read_unit_interval_float(raw_gui.get("source_opacity", 0.25), "gui.source_opacity"),
     )
 
 
@@ -109,4 +113,15 @@ def _read_positive_float(value: Any, field_name: str) -> float:
     numeric_value = float(value)
     if numeric_value <= 0.0:
         raise ValueError(f"{field_name} must be strictly positive.")
+    return numeric_value
+
+
+def _read_unit_interval_float(value: Any, field_name: str) -> float:
+    """Read a float in the inclusive `[0, 1]` range from the GUI settings."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} must be numeric.")
+
+    numeric_value = float(value)
+    if not 0.0 <= numeric_value <= 1.0:
+        raise ValueError(f"{field_name} must be between 0 and 1.")
     return numeric_value

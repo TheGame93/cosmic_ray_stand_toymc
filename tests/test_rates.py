@@ -12,8 +12,8 @@ class RateTests(unittest.TestCase):
     """Check numerical rate and probability helpers."""
 
     def test_binomial_rate_matches_expected_scale(self) -> None:
-        """The rate value should be the pass fraction times `flux * area`."""
-        estimate = binomial_rate(n_pass=25, n_total=100, flux=2.0, area=3.0)
+        """The rate value should be the pass fraction times `total_rate_hz`."""
+        estimate = binomial_rate(n_pass=25, n_total=100, total_rate_hz=6.0)
         self.assertAlmostEqual(estimate.value, 1.5)
         self.assertGreater(estimate.error, 0.0)
 

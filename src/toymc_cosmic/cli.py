@@ -75,7 +75,7 @@ def _print_headless_summary(config, simulation_result) -> None:
     print(f"Seed: {simulation_result.seed}")
     print(
         "Generated events: "
-        f"{simulation_result.n_events}  (A_gen = {simulation_result.area_gen:.3f} cm^2)"
+        f"{simulation_result.n_events}  (source rate = {simulation_result.total_rate_hz:.6g} Hz)"
     )
     print()
 

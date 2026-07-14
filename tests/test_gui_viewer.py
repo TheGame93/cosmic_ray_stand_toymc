@@ -7,7 +7,7 @@ from unittest import mock
 
 import numpy as np
 
-from toymc_cosmic.config import Config, ConditionalConfig
+from toymc_cosmic.config import Config, ConditionalConfig, CosmicSourceConfig
 from toymc_cosmic.geometry import Detector
 from toymc_cosmic.gui.buttons import build_navigation_button_specs
 from toymc_cosmic.gui.config import GUIConfig
@@ -42,9 +42,7 @@ class GuiViewerControllerTests(unittest.TestCase):
         ]
         config = Config(
             seed=123,
-            theta_max=1.0,
-            angular_model=mock.Mock(),
-            flux_hz_per_cm2=0.01,
+            source_model=CosmicSourceConfig(theta_max=1.0, model="cos2", flux_hz_per_cm2=0.01),
             monte_carlo=mock.Mock(n_events=2),
             detectors=detectors,
             logic_expressions=[],
@@ -167,6 +165,8 @@ class GuiViewerControllerTests(unittest.TestCase):
             track_color_fired_given_only="gold",
             track_color_fired_joint="lime",
             line_width=4.0,
+            source_color="orange",
+            source_opacity=0.25,
         )
 
 

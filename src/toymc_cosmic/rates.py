@@ -34,7 +34,7 @@ class ProbabilityEstimate:
     n_cond: int
 
 
-def binomial_rate(n_pass: int, n_total: int, flux: float, area: float) -> RateEstimate:
+def binomial_rate(n_pass: int, n_total: int, total_rate_hz: float) -> RateEstimate:
     """Convert a passing-event count into a rate estimate."""
     if n_total <= 0:
         raise ValueError("n_total must be positive.")
@@ -42,9 +42,8 @@ def binomial_rate(n_pass: int, n_total: int, flux: float, area: float) -> RateEs
     pass_fraction = n_pass / n_total
     variance = pass_fraction * (1.0 - pass_fraction) / n_total
 
-    scale = flux * area
-    value = scale * pass_fraction
-    error = scale * math.sqrt(max(variance, 0.0))
+    value = total_rate_hz * pass_fraction
+    error = total_rate_hz * math.sqrt(max(variance, 0.0))
     return RateEstimate(value=value, error=error, n_pass=n_pass, n_total=n_total)
 
 
@@ -79,14 +78,12 @@ def detector_rates(simulation_result: SimulationResult) -> dict[str, dict[str, R
             "geometric": binomial_rate(
                 geometric_count,
                 simulation_result.n_events,
-                simulation_result.flux,
-                simulation_result.area_gen,
+                simulation_result.total_rate_hz,
             ),
             "fired": binomial_rate(
                 fired_count,
                 simulation_result.n_events,
-                simulation_result.flux,
-                simulation_result.area_gen,
+                simulation_result.total_rate_hz,
             ),
         }
 
@@ -105,14 +102,12 @@ def logic_rates(expression: str, simulation_result: SimulationResult) -> dict[st
         "geometric": binomial_rate(
             geometric_count,
             simulation_result.n_events,
-            simulation_result.flux,
-            simulation_result.area_gen,
+            simulation_result.total_rate_hz,
         ),
         "fired": binomial_rate(
             fired_count,
             simulation_result.n_events,
-            simulation_result.flux,
-            simulation_result.area_gen,
+            simulation_result.total_rate_hz,
         ),
     }
 

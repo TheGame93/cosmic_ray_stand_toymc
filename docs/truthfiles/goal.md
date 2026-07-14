@@ -41,7 +41,14 @@ the physical stand.
 The engine already has an `AngularModel` abstract base class in
 `angular.py`, plus an unused `TabulatedAngularModel` implementation built for
 arbitrary zenith-angle weight functions. `config.py` currently hard-rejects
-any `angular_model.type` other than `"cos2"`, so this pluggable-model path
-exists at the Python level but is not yet exposed through YAML. Treat this as
-a fact about the current codebase, not a commitment — see
-`docs/human/plan_engine.md` for the original design intent.
+any `source_model.model` other than `"cos2"` for `source_model.type:
+cosmic`, so this pluggable-model path exists at the Python level but is not
+yet exposed through YAML. Treat this as a fact about the current codebase,
+not a commitment — see `docs/human/plan_engine.md` for the original design
+intent.
+
+Similarly, the `beam` source's `divergence` profile is recognized by
+`config.py` (the YAML key parses) but has no implementation:
+`source.BeamSourceModel` raises `NotImplementedError` if constructed with
+`profile: divergence`. The `object` source's isotropic 4*pi emission has no
+collimation option — a future addition, not modeled today.

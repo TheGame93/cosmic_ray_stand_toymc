@@ -40,9 +40,15 @@
 Clone or copy the repository, then run one of these:
 
 ```bash
-./run_toymc.sh configs/example.yaml                       # only terminal output
-./run_toymc.sh configs/example.yaml --gui --geometry-only # view detector geometry
-./run_toymc.sh configs/example.yaml --gui --event-display # view particle tracks
+./run_toymc.sh configs/example_cosmic.yaml                       # only terminal output
+./run_toymc.sh configs/example_cosmic.yaml --gui --geometry-only # view detector geometry
+./run_toymc.sh configs/example_cosmic.yaml --gui --event-display # view particle tracks
+```
+
+You can also change source type:
+```bash
+configs/example_beam.yaml   # horizontal particle beam
+configs/example_object.yaml # radioactive source
 ```
 
 ## Table of Contents
@@ -74,7 +80,7 @@ optional GUI layer. It:
 The main entry point is:
 
 ```bash
-./run_toymc.sh configs/example.yaml
+./run_toymc.sh configs/example_cosmic.yaml
 ```
 
 On the first run, the script will:
@@ -89,7 +95,7 @@ Later runs reuse the same environment unless `requirements.txt` changes.
 <summary><strong>Expected headless output</strong></summary>
 
 ```text
-$ ./run_toymc.sh configs/example.yaml
+$ ./run_toymc.sh configs/example_cosmic.yaml
 Progress: 2000000 / 2000000 (100.00%)
 Seed: 123456
 Generated events: 2000000  (A_gen = 61600.180 cm^2)
@@ -125,7 +131,7 @@ Conditional probabilities:
 ### Geometry Only
 
 ```bash
-./run_toymc.sh configs/example.yaml --gui --geometry-only
+./run_toymc.sh configs/example_cosmic.yaml --gui --geometry-only
 ```
 
 This opens a rotatable 3D view of the detector geometry without running the
@@ -134,7 +140,7 @@ Monte Carlo.
 ### Event Display
 
 ```bash
-./run_toymc.sh configs/example.yaml --gui --event-display
+./run_toymc.sh configs/example_cosmic.yaml --gui --event-display
 ```
 
 This runs the simulation once and then shows only relevant tracks.
@@ -175,9 +181,8 @@ The engine is configured through YAML.
 <summary><strong>Minimal field overview</strong></summary>
 
 - `seed`: fixed integer seed, or `null` to derive it from local time
-- `theta_max_deg`: maximum zenith angle in degrees
-- `angular_model.type`: currently only `cos2`
-- `flux_hz_per_cm2`: total downward flux over the simulated cone
+- `source_model`: particle source; one of `cosmic`, `beam`, or `object` (see
+  below)
 - `monte_carlo.n_events`: number of generated events
 - `detectors`: list of detector volumes
 - `logic.expressions`: boolean detector expressions to evaluate as rates
@@ -188,16 +193,67 @@ The engine is configured through YAML.
 </details>
 
 <details>
+<summary><strong>Source models</strong></summary>
+
+`source_model.type` selects one of three particle sources. Only one source
+is active per run.
+
+**`cosmic`** — downward cosmic-ray-like flux, sampled from a `cos^2(theta)`
+zenith-angle distribution over a flat plane above the detector stack:
+
+```yaml
+source_model:
+  type: cosmic
+  model: cos2           # only supported model today
+  theta_max_deg: 70     # 0 < theta_max_deg < 90
+  flux_hz_per_cm2: 0.01 # total downward flux over the simulated cone
+```
+
+**`beam`** — a directed beam traveling in `+z` (`z` increases going
+downstream, entering from the detector stack's lowest-`z` face), with a
+transverse spatial profile:
+
+```yaml
+source_model:
+  type: beam
+  profile: uniform      # uniform | gaussian | divergence (not yet implemented)
+  center: [0.0, 0.0]    # xc, yc
+  size: [8.0]           # uniform: [diameter]; gaussian: [FWHM_x, FWHM_y]
+  flux_hz_per_cm2: 50.0 # uniform: the flux; gaussian: average over the FWHM ellipse
+```
+
+Selecting `beam` also changes the GUI's default startup view: the `yz`
+plane becomes the horizontal ground plane (beam entering from the side)
+with `x` pointing up, instead of the usual `z`-up view.
+
+**`object`** — a radioactive point/volume source emitting isotropically
+over the full 4*pi sphere from a random point inside the volume:
+
+```yaml
+source_model:
+  type: object
+  shape: sphere           # sphere | disk | box
+  center: [0.0, 0.0,20.0] # xc, yc, zc
+  size: [2.0]             # sphere: [diameter]; disk: [diameter_xy, wz]; box: [wx, wy, wz]
+  activity_hz: 100000.0   # total emission rate
+```
+
+`object` sources are rendered in the GUI using `gui.source_color` /
+`gui.source_opacity` (defaults: `orange`, `0.25`).
+
+</details>
+
+<details>
 <summary><strong>Full example YAML</strong></summary>
 
 ```yaml
 seed: 123456
-theta_max_deg: 70
 
-angular_model:
-  type: cos2
-
-flux_hz_per_cm2: 0.01
+source_model:
+  type: cosmic
+  model: cos2
+  theta_max_deg: 70
+  flux_hz_per_cm2: 0.01
 
 monte_carlo:
   n_events: 2000000
@@ -370,7 +426,7 @@ pip install -r requirements.txt
 If you already activated that environment yourself, you can also run:
 
 ```bash
-python3 scripts/run_toymc.py configs/example.yaml
+python3 scripts/run_toymc.py configs/example_cosmic.yaml
 ```
 
 </details>

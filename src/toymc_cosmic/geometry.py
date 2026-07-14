@@ -108,6 +108,12 @@ def reference_z(detectors: list[Detector]) -> float:
     return max(float(detector.upper_bounds[2]) for detector in detectors)
 
 
+def min_reference_z(detectors: list[Detector]) -> float:
+    """Return the lowest detector bottom face used as the beam upstream origin plane."""
+    _require_detectors(detectors)
+    return min(float(detector.lower_bounds[2]) for detector in detectors)
+
+
 def intersect(
     origins: np.ndarray,
     directions: np.ndarray,

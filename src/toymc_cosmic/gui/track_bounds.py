@@ -15,7 +15,8 @@ import math
 
 import numpy as np
 
-from ..geometry import Detector, generation_region
+from ..geometry import Detector, bounding_box
+from ..source import SourceModel
 
 
 @dataclass(frozen=True)
@@ -30,26 +31,69 @@ class DisplayBounds:
     z_max: float
 
 
-def compute_display_bounds(detectors: list[Detector], theta_max: float) -> DisplayBounds:
-    """Compute the finite box used to clip displayed event tracks."""
-    x_min, x_max, y_min, y_max, _ = generation_region(detectors, theta_max)
-    z_lower_bounds = [float(detector.lower_bounds[2]) for detector in detectors]
-    z_upper_bounds = [float(detector.upper_bounds[2]) for detector in detectors]
-    min_z = min(z_lower_bounds)
-    max_z = max(z_upper_bounds)
-    vertical_span = max_z - min_z
+def compute_display_bounds(detectors: list[Detector], source_model: SourceModel) -> DisplayBounds:
+    """Compute the finite box used to clip displayed event tracks.
 
-    top_margin = 0.1 * max(abs(max_z), vertical_span)
-    bottom_margin = 0.1 * max(abs(min_z), vertical_span)
+    Unions the detector bounding box with the source's own spatial footprint
+    (`source_model.spatial_bounds`), then pads every axis by 10% of its span
+    (or of the bound's own magnitude, whichever is larger, matching the
+    padding this module has always used for `z`) -- one box shape for all
+    source types instead of a cosmic-specific `theta_max` margin.
+    """
+    detector_bounds = _detector_bounds(detectors)
+    source_bounds = source_model.spatial_bounds(detectors)
+    unioned = _union_bounds(detector_bounds, source_bounds)
+    return _pad_bounds(unioned)
 
-    return DisplayBounds(
-        x_min=x_min,
-        x_max=x_max,
-        y_min=y_min,
-        y_max=y_max,
-        z_min=min_z - bottom_margin,
-        z_max=max_z + top_margin,
+
+def _detector_bounds(detectors: list[Detector]) -> tuple[float, float, float, float, float, float]:
+    """Return the detector stack's own axis-aligned bounds."""
+    x_min, x_max, y_min, y_max = bounding_box(detectors)
+    z_min = min(float(detector.lower_bounds[2]) for detector in detectors)
+    z_max = max(float(detector.upper_bounds[2]) for detector in detectors)
+    return x_min, x_max, y_min, y_max, z_min, z_max
+
+
+def _union_bounds(
+    first: tuple[float, float, float, float, float, float],
+    second: tuple[float, float, float, float, float, float],
+) -> tuple[float, float, float, float, float, float]:
+    """Return the axis-aligned union of two `(xmin,xmax,ymin,ymax,zmin,zmax)` boxes."""
+    return (
+        min(first[0], second[0]),
+        max(first[1], second[1]),
+        min(first[2], second[2]),
+        max(first[3], second[3]),
+        min(first[4], second[4]),
+        max(first[5], second[5]),
     )
+
+
+def _pad_bounds(bounds: tuple[float, float, float, float, float, float]) -> DisplayBounds:
+    """Pad every axis of a raw bounds tuple into a `DisplayBounds`."""
+    x_min, x_max, y_min, y_max, z_min, z_max = bounds
+    return DisplayBounds(
+        x_min=_padded_min(x_min, x_max),
+        x_max=_padded_max(x_min, x_max),
+        y_min=_padded_min(y_min, y_max),
+        y_max=_padded_max(y_min, y_max),
+        z_min=_padded_min(z_min, z_max),
+        z_max=_padded_max(z_min, z_max),
+    )
+
+
+def _padded_min(axis_min: float, axis_max: float) -> float:
+    """Return `axis_min` padded outward by 10% of its span or magnitude."""
+    span = axis_max - axis_min
+    margin = 0.1 * max(abs(axis_min), span)
+    return axis_min - margin
+
+
+def _padded_max(axis_min: float, axis_max: float) -> float:
+    """Return `axis_max` padded outward by 10% of its span or magnitude."""
+    span = axis_max - axis_min
+    margin = 0.1 * max(abs(axis_max), span)
+    return axis_max + margin
 
 
 def clip_line_to_bounds(

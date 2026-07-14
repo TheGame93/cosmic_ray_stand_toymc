@@ -17,6 +17,7 @@ from typing import Any, Callable
 
 from ..config import Config
 from ..simulation import SimulationResult
+from ..source import build_source_model
 from .buttons import (
     NavigationButtonSpec,
     build_button_texture_pixels,
@@ -51,6 +52,7 @@ from .scene import (
     detector_scene_bounds,
     plotter_viewport_aspect_ratio,
     render_detector_colors,
+    startup_view_up,
 )
 from .track_bounds import DisplayBounds, clip_line_to_bounds, compute_display_bounds
 
@@ -69,7 +71,8 @@ def show_event_display(config: Config, simulation_result: SimulationResult) -> N
         raise ValueError(
             "No geometrically relevant tracks were found for the configured conditionals."
         )
-    display_bounds = compute_display_bounds(config.detectors, config.theta_max)
+    source_model = build_source_model(config.source_model)
+    display_bounds = compute_display_bounds(config.detectors, source_model)
     navigator = EventNavigator(relevant_event_indices, prepared_conditionals, gui_config)
     controller = EventDisplayController(
         config=config,
@@ -101,12 +104,14 @@ class EventDisplayController:
         self._plotter = build_plotter(
             config.detectors,
             gui_config,
+            config.source_model,
             reserve_bottom_px=BOTTOM_STACK_RESERVE_PX,
             shift_axes_right_px=AXES_HORIZONTAL_SHIFT_PX,
         )
         self._initial_camera_position = build_startup_camera_position(
             detector_scene_bounds(config.detectors),
             viewport_aspect_ratio=plotter_viewport_aspect_ratio(self._plotter),
+            view_up=startup_view_up(config.source_model),
         )
         self._button_widgets: list[Any] = []
 
