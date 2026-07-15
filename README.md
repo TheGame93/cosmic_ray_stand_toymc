@@ -204,7 +204,19 @@ The engine is configured through YAML.
 
 </details>
 
-<details open>
+<details>
+<summary><strong>Detector fields</strong></summary>
+
+Each detector entry must contain:
+
+- `name`: unique detector name used in logic expressions
+- `center`: `[x, y, z]`
+- `size`: `[dx, dy, dz]`
+- `efficiency`: number between `0` and `1`
+
+</details>
+
+<details>
 <summary><strong>Source models</strong></summary>
 
 `source_model.type` selects one of three particle sources. Only one source
@@ -255,89 +267,6 @@ source_model:
 
 </details>
 
-<details>
-<summary><strong>Full example YAML</strong></summary>
-
-```yaml
-seed: 123456
-
-source_model:
-  type: cosmic
-  model: cos2
-  theta_max_deg: 70
-  flux_hz_per_cm2: 0.01
-
-monte_carlo:
-  n_events: 2000000
-
-detectors:
-  - name: T1
-    center: [0.0, 0.0, 13.0]
-    size: [10.0, 10.0, 0.9]
-    efficiency: 0.8
-  - name: T3
-    center: [0.0, 0.0, 7.0]
-    size: [ 6.0,  5.0, 0.9]
-    efficiency: 0.8
-  - name: D1
-    center: [0.0, 0.0,  6.0]
-    size: [ 6.0,  5.0, 0.3]
-    efficiency: 1
-  - name: T2
-    center: [0.0, 0.0, 0.0]
-    size: [10.0, 10.0, 0.9]
-    efficiency: 0.8
-
-logic:
-  expressions:
-    - "T1 and T2"
-    - "T1 and T2 and T3"
-  conditional:
-    - name: "D1|T1*T2"
-      numerator: "D1"
-      given: "T1 and T2"
-    - name: "D1|T1*T2*T3"
-      numerator: "D1"
-      given: "T1 and T2 and T3"
-
-output:
-  detector_rate_decimals: 3
-  logic_rate_decimals: 3
-
-gui:
-  # Accepted color examples:
-  # - named colors such as black, lightgray, orange, lime
-  # - named colors reference: Matplotlib named colors
-  #   https://matplotlib.org/stable/gallery/color/named_colors.html
-  # - hex strings such as "#ff8800"
-  # - RGB triples such as [0.2, 0.6, 1.0]
-  background_color: white
-  default_detector_color: lightgray
-  detector_colors:
-    T1: black
-    T3: black
-    D1: gray
-    T2: black
-  default_track_color: black
-  track_color_geometric_only: black      # given true geometrically, but false in fired mode
-  track_color_fired_given_only: red       # given true in fired mode, numerator false
-  track_color_fired_joint: green          # given true in fired mode, numerator true
-  line_width: 4.0
-```
-
-</details>
-
-<details>
-<summary><strong>Detector fields</strong></summary>
-
-Each detector entry must contain:
-
-- `name`: unique detector name used in logic expressions
-- `center`: `[x, y, z]`
-- `size`: `[dx, dy, dz]`
-- `efficiency`: number between `0` and `1`
-
-</details>
 
 ## Logic and Conditionals
 
