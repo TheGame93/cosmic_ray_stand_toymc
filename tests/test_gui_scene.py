@@ -31,7 +31,7 @@ from toymc_cosmic.gui.scene import (
 )
 
 
-_COSMIC_SOURCE_CONFIG = CosmicSourceConfig(theta_max=1.0, model="cos2", flux_hz_per_cm2=0.01)
+_COSMIC_SOURCE_CONFIG = CosmicSourceConfig(model="cos2", flux_hz_per_cm2=0.01)
 
 
 class GuiSceneTests(unittest.TestCase):
@@ -257,7 +257,15 @@ class GuiSceneTests(unittest.TestCase):
     def test_startup_view_up_flips_for_beam_sources(self) -> None:
         """Beam sources use x-up; other source types keep the default z-up view."""
         beam_config = BeamSourceConfig(profile="uniform", center=(0.0, 0.0), size=(1.0,), flux_hz_per_cm2=1.0)
-        object_config = ObjectSourceConfig(shape="sphere", center=(0.0, 0.0, 0.0), size=(1.0,), activity_hz=1.0)
+        object_config = ObjectSourceConfig(
+            center=(0.0, 0.0, 0.0),
+            diameter=1.0,
+            normal=(0.0, 0.0, 1.0),
+            angular_model="uniform",
+            activity_bq=1.0,
+            yield_per_decay=1.0,
+            surface_emission_rate_hz=None,
+        )
 
         self.assertEqual(startup_view_up(beam_config), BEAM_VIEW_UP)
         self.assertEqual(startup_view_up(_COSMIC_SOURCE_CONFIG), STARTUP_VIEW_UP)
@@ -268,38 +276,25 @@ class GuiSceneTests(unittest.TestCase):
         self,
         require_pyvista_mock: mock.Mock,
     ) -> None:
-        """An object source should add exactly one mesh, colored from the GUI config."""
+        """An object source should add exactly one oriented disk mesh."""
         require_pyvista_mock.return_value = FakePyVistaModule()
         plotter = FakePlotter()
         object_config = ObjectSourceConfig(
-            shape="sphere", center=(0.0, 0.0, 0.0), size=(2.0,), activity_hz=1.0
+            center=(0.0, 0.0, 0.0),
+            diameter=2.0,
+            normal=(0.0, 1.0, 0.0),
+            angular_model="uniform",
+            activity_bq=1.0,
+            yield_per_decay=1.0,
+            surface_emission_rate_hz=None,
         )
 
         render_source_shape(plotter, object_config, self._gui_config(), [])
 
         self.assertEqual(len(plotter.mesh_calls), 1)
+        self.assertEqual(plotter.mesh_calls[0]["mesh"], ("disc", (0.0, 0.0, 0.0), 0.0, 1.0, (0.0, 1.0, 0.0)))
         self.assertEqual(plotter.mesh_calls[0]["color"], "orange")
         self.assertEqual(plotter.mesh_calls[0]["opacity"], 0.25)
-
-    @mock.patch("toymc_cosmic.gui.scene._require_pyvista")
-    def test_render_source_shape_box_reuses_object_source_model_spatial_bounds(
-        self,
-        require_pyvista_mock: mock.Mock,
-    ) -> None:
-        """A box-shape object source's mesh bounds must match ObjectSourceModel.spatial_bounds."""
-        require_pyvista_mock.return_value = FakePyVistaModule()
-        plotter = FakePlotter()
-        detectors = [Detector("T1", [0.0, 0.0, 10.0], [2.0, 2.0, 1.0], 1.0)]
-        object_config = ObjectSourceConfig(
-            shape="box", center=(1.0, 2.0, 3.0), size=(4.0, 6.0, 8.0), activity_hz=1.0
-        )
-
-        render_source_shape(plotter, object_config, self._gui_config(), detectors)
-
-        self.assertEqual(
-            plotter.mesh_calls[0]["mesh"],
-            ("box", (-1.0, 3.0, -1.0, 5.0, -1.0, 7.0)),
-        )
 
     @mock.patch("toymc_cosmic.gui.scene._require_pyvista")
     def test_render_source_shape_is_a_no_op_for_non_object_sources(
@@ -335,20 +330,15 @@ class FakePyVistaModule:
 
     @staticmethod
     def Box(bounds: tuple[float, ...]) -> tuple[str, tuple[float, ...]]:
-        """Return a simple tuple so tests can assert that a mesh was created."""
+        """Return a simple tuple so detector meshes can be asserted."""
         return ("box", bounds)
 
     @staticmethod
-    def Sphere(radius: float, center: tuple[float, ...]) -> tuple[str, float, tuple[float, ...]]:
+    def Disc(
+        *, center: tuple[float, ...], inner: float, outer: float, normal: tuple[float, ...]
+    ) -> tuple[str, tuple[float, ...], float, float, tuple[float, ...]]:
         """Return a simple tuple so tests can assert that a mesh was created."""
-        return ("sphere", radius, center)
-
-    @staticmethod
-    def Cylinder(
-        center: tuple[float, ...], direction: tuple[float, ...], radius: float, height: float
-    ) -> tuple[str, tuple[float, ...], tuple[float, ...], float, float]:
-        """Return a simple tuple so tests can assert that a mesh was created."""
-        return ("cylinder", center, direction, radius, height)
+        return ("disc", center, inner, outer, normal)
 
     @staticmethod
     def Plotter() -> "FakePlotter":

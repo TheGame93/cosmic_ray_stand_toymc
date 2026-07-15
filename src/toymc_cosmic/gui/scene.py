@@ -9,7 +9,6 @@ import numpy as np
 
 from ..config import BeamSourceConfig, Config, ObjectSourceConfig, SourceModelConfig
 from ..geometry import Detector
-from ..source import build_source_model
 from .config import GUIConfig, load_gui_config
 
 
@@ -42,7 +41,7 @@ def startup_view_up(source_config: SourceModelConfig) -> tuple[float, float, flo
     `beam` sources travel horizontally along `z`, so the default view flips
     to `x` pointing up (the `yz` plane becomes the horizontal ground plane,
     with the beam entering from the side) instead of the usual `z`-up view
-    used for downward-traveling `cosmic`/`object` sources.
+    used for `cosmic` and `object` sources.
     """
     if isinstance(source_config, BeamSourceConfig):
         return BEAM_VIEW_UP
@@ -102,20 +101,14 @@ def render_source_shape(
     gui_config: GUIConfig,
     detectors: list[Detector],
 ) -> None:
-    """Render the source volume once for `object`-type sources; no-op otherwise."""
+    """Render the object-source disk once for `object`-type sources; no-op otherwise."""
     if not isinstance(source_config, ObjectSourceConfig):
         return
 
     pv = _require_pyvista()
     center = source_config.center
-    size = source_config.size
-
-    if source_config.shape == "sphere":
-        mesh = pv.Sphere(radius=0.5 * size[0], center=center)
-    elif source_config.shape == "disk":
-        mesh = pv.Cylinder(center=center, direction=(0.0, 0.0, 1.0), radius=0.5 * size[0], height=size[1])
-    else:
-        mesh = pv.Box(bounds=build_source_model(source_config).spatial_bounds(detectors))
+    radius = 0.5 * source_config.diameter
+    mesh = pv.Disc(center=center, inner=0.0, outer=radius, normal=source_config.normal,c_res=64)
 
     plotter.add_mesh(
         mesh,

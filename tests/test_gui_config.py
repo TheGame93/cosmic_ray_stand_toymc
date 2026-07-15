@@ -97,7 +97,6 @@ class GuiConfigTests(unittest.TestCase):
         source_model:
           type: cosmic
           model: cos2
-          theta_max_deg: 80.0
           flux_hz_per_cm2: 0.01
         monte_carlo:
           n_events: 10

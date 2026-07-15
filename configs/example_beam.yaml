@@ -5,7 +5,7 @@ source_model:
   profile: uniform      # uniform | gaussian | divergence (not yet implemented)
   center: [0.0, 0.0]    # xc, yc
   size: [8.0]           # uniform: [diameter]; gaussian: [FWHM_x, FWHM_y]
-  flux_hz_per_cm2: 10.0 # uniform: the flux; gaussian: average over the FWHM ellipse
+  flux_hz_per_cm2: 10.0 # uniform: the flux; gaussian: average flux over the FWHM ellipse
 
 monte_carlo:
   n_events: 2000000

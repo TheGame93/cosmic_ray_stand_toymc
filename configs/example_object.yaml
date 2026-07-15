@@ -2,10 +2,13 @@ seed: 123456
 
 source_model:
   type: object
-  shape: disk           # sphere | disk | box
-  center: [0.0, 0.0,3.0] # xc, yc, zc
-  size: [1.0,0.5]             # sphere: [diameter]; disk: [diameter_xy, wz]; box: [wx, wy, wz]
-  activity_hz: 1000.0   # total emission rate
+  center: [0.0, 0.0, 3.0]      # xc, yc, zc
+  diameter: 1.0                # emitting disk diameter
+  normal: [0.0, 0.0, -1.0]     # emitting side: directions satisfy `direction dot normal > 0`
+  angular_model: uniform       # uniform | cosine-weighted | material-dependent (not yet implemented)
+  activity_bq: 1000.0          # intrinsic source activity from the datasheet/certificate
+  yield_per_decay: 1.0         # optional; defaults to 1.0
+  # surface_emission_rate_hz: 500.0  # optional authoritative override of the derived front emission
 
 monte_carlo:
   n_events: 2000000

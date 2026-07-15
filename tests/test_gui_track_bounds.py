@@ -53,7 +53,11 @@ class ComputeDisplayBoundsTests(unittest.TestCase):
     def test_bounds_extend_to_include_an_object_source_outside_the_stack(self) -> None:
         """An object source placed away from the stack must widen the display box to reach it."""
         source_model = ObjectSourceModel(
-            shape="sphere", center=(0.0, 0.0, -20.0), size=(2.0,), activity_hz=1.0
+            center=(0.0, 0.0, -20.0),
+            diameter=2.0,
+            normal=(0.0, 0.0, 1.0),
+            angular_model="uniform",
+            front_emission_rate_hz=1.0,
         )
         bounds = compute_display_bounds(self.detectors, source_model)
 

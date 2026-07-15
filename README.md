@@ -110,7 +110,7 @@ Later runs reuse the same environment unless `requirements.txt` changes.
 $ ./run_toymc.sh configs/example_cosmic.yaml
 Progress: 2000000 / 2000000 (100.00%)
 Seed: 123456
-Generated events: 2000000  (A_gen = 61600.180 cm^2)
+Generated events: 2000000  (cosmic flux = 0.01 Hz/cm2)
 
 Detector rates:
   det  geometric           fired
@@ -216,24 +216,57 @@ Each detector entry must contain:
 
 </details>
 
-<details>
+<details open>
 <summary><strong>Source models</strong></summary>
 
 `source_model.type` selects one of three particle sources. Only one source
 is active per run.
 
-**`cosmic`** — downward cosmic-ray-like flux, sampled from a `cos^2(theta)`
-zenith-angle distribution over a flat plane above the detector stack:
+### `cosmic`
+Downward cosmic-ray-like flux, sampled from a `cos^2(theta)`
+sky intensity law. The configured `flux_hz_per_cm2` is the real total
+downward plane flux through a horizontal area, so enlarging the auxiliary
+simulation sphere does not change the physical detector rate by itself:
 
 ```yaml
 source_model:
   type: cosmic
   model: cos2           # only supported model today
-  theta_max_deg: 70     # 0 < theta_max_deg < 90
-  flux_hz_per_cm2: 0.01 # total downward flux over the simulated cone
+  flux_hz_per_cm2: 0.01 # real downward plane flux through a horizontal area
 ```
 
-**`beam`** — a directed beam traveling in `+z` (`z` increases going
+<details>
+<summary><strong>math detail</strong></summary>
+
+The user provides the physical plane flux \(F\) in `Hz/cm^2`, integrated
+over the full downward hemisphere.
+
+For the built-in `cos2` model, the sky intensity is
+\(I(\theta) \propto \cos^2\theta\), but tracks crossing a horizontal area
+must also be weighted by the projected-area factor \(\cos\theta\) and by
+the solid-angle Jacobian \(\sin\theta\). The sampled zenith distribution is
+therefore:
+
+\[
+p(\theta) = 3 \cos^2\theta \sin\theta, \qquad 0 \le \theta \le \frac{\pi}{2}.
+\]
+
+Sampling uses an enclosing sphere around the detector stack. For each
+direction, the code chooses a point uniformly on the disk perpendicular to
+that direction and tangent to the sphere, then back-propagates to the entry
+point on the sphere surface. This reproduces the same crossing statistics as
+the real sky flux while keeping the generation volume finite.
+
+If the enclosing sphere radius is \(R\), the generated entry rate is:
+
+\[
+R_\mathrm{gen} = \frac{4}{3}\pi R^2 F.
+\]
+
+</details>
+
+### `beam`
+A directed beam traveling in `+z` (`z` increases going
 downstream, entering from the detector stack's lowest-`z` face), with a
 transverse spatial profile:
 
@@ -250,20 +283,108 @@ Selecting `beam` also changes the GUI's default startup view: the `yz`
 plane becomes the horizontal ground plane (beam entering from the side)
 with `x` pointing up, instead of the usual `z`-up view.
 
-**`object`** — a radioactive point/volume source emitting isotropically
-over the full 4*pi sphere from a random point inside the volume:
+<details>
+<summary><strong>math detail</strong></summary>
+
+For `profile: uniform`, origins are sampled uniformly over a disk of
+diameter `size[0]`, so the total beam rate is:
+
+\[
+R_\mathrm{gen} = \Phi \, \pi \left(\frac{d}{2}\right)^2
+\]
+
+with \(\Phi =\) `flux_hz_per_cm2`.
+
+For `profile: gaussian`, `size` means `[FWHM_x, FWHM_y]` and the code uses
+\(\sigma = \mathrm{FWHM} / (2\sqrt{2\ln 2})\). The user-provided
+`flux_hz_per_cm2` is interpreted as the average flux over the FWHM ellipse:
+
+\[
+A_\mathrm{FWHM} = \pi \frac{\mathrm{FWHM}_x}{2}\frac{\mathrm{FWHM}_y}{2}.
+\]
+
+An independent 2D Gaussian has exactly half of its total population inside
+that ellipse, so the total rate is:
+
+\[
+R_\mathrm{gen} = 2 \, \Phi \, A_\mathrm{FWHM}.
+\]
+
+Sampling is truncated at \(5\sigma\) in the transverse plane: the code keeps
+drawing from the Gaussian until the sampled point lies inside the
+\(5\sigma\) ellipse. The discarded tail is about \(e^{-25/2} \approx
+3.7\times 10^{-6}\) of the total population, so this cutoff is negligible
+for this toy Monte Carlo while giving a hard finite bound for the GUI.
+
+</details>
+
+### `object`
+A mounted one-sided radioactive disk source. Emission points
+are sampled on the disk surface and directions are sampled only into the
+forward hemisphere defined by `normal`:
 
 ```yaml
 source_model:
   type: object
-  shape: sphere           # sphere | disk | box
-  center: [0.0, 0.0,20.0] # xc, yc, zc
-  size: [2.0]             # sphere: [diameter]; disk: [diameter_xy, wz]; box: [wx, wy, wz]
-  activity_hz: 100000.0   # total emission rate
+  center: [0.0, 0.0, 20.0]    # xc, yc, zc
+  diameter: 2.0               # emitting disk diameter
+  normal: [0.0, 0.0, -1.0]    # emitting side; normalized internally if needed
+  angular_model: uniform      # uniform | cosine-weighted | material-dependent (not yet implemented)
+  activity_bq: 100000.0       # intrinsic source activity from the datasheet/certificate
+  yield_per_decay: 1.0        # optional; defaults to 1.0
+  # surface_emission_rate_hz: 50000.0  # optional authoritative override
 ```
 
 `object` sources are rendered in the GUI using `gui.source_color` /
 `gui.source_opacity` (defaults: `orange`, `0.25`).
+
+`activity_bq` means intrinsic source activity, not necessarily the actual
+front-side particle emission rate. Datasheets sometimes report both, and
+they are not always equal. If only `activity_bq` is provided, the engine
+derives the front emission rate with the simple toy-MC assumption:
+
+- one relevant particle per decay
+- isotropic microscopic emission
+- perfect backing
+
+That gives `front emission = 0.5 * activity_bq * yield_per_decay`.
+If `surface_emission_rate_hz` is present, it overrides the derived value.
+
+<details>
+<summary><strong>math detail</strong></summary>
+
+Let \(\hat{n}\) be the normalized `normal` vector. The source position is
+sampled uniformly on the disk surface:
+
+\[
+r = R\sqrt{u}, \qquad \phi \sim U(0, 2\pi),
+\]
+
+with \(R = \) `diameter / 2`.
+
+Directions are always emitted into the forward hemisphere,
+\(\hat{d}\cdot\hat{n} > 0\).
+
+For `angular_model: uniform`, the hemisphere is sampled uniformly:
+
+\[
+\cos\theta \sim U(0, 1).
+\]
+
+For `angular_model: cosine-weighted`, the emission is Lambert-like:
+
+\[
+p(\theta) = 2\cos\theta\sin\theta, \qquad \cos\theta = \sqrt{u}.
+\]
+
+If `surface_emission_rate_hz` is not provided, the toy model derives the
+front emission rate as:
+
+\[
+R_\mathrm{front} = 0.5 \times \texttt{activity\_bq} \times \texttt{yield\_per\_decay}.
+\]
+
+</details>
 
 </details>
 

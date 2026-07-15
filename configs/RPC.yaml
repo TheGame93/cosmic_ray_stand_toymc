@@ -3,8 +3,7 @@ seed: 123456
 source_model:
   type: cosmic
   model: cos2
-  theta_max_deg: 70
-  flux_hz_per_cm2: 0.01
+  flux_hz_per_cm2: 0.01 # cosmic flux over a thin surface
 
 monte_carlo:
   n_events: 2000000

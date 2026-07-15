@@ -38,7 +38,7 @@ def compute_display_bounds(detectors: list[Detector], source_model: SourceModel)
     (`source_model.spatial_bounds`), then pads every axis by 10% of its span
     (or of the bound's own magnitude, whichever is larger, matching the
     padding this module has always used for `z`) -- one box shape for all
-    source types instead of a cosmic-specific `theta_max` margin.
+    source types instead of source-specific expansion rules.
     """
     detector_bounds = _detector_bounds(detectors)
     source_bounds = source_model.spatial_bounds(detectors)

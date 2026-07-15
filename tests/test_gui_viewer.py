@@ -42,7 +42,7 @@ class GuiViewerControllerTests(unittest.TestCase):
         ]
         config = Config(
             seed=123,
-            source_model=CosmicSourceConfig(theta_max=1.0, model="cos2", flux_hz_per_cm2=0.01),
+            source_model=CosmicSourceConfig(model="cos2", flux_hz_per_cm2=0.01),
             monte_carlo=mock.Mock(n_events=2),
             detectors=detectors,
             logic_expressions=[],

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 
 import numpy as np
 
@@ -69,37 +68,39 @@ def bounding_box(detectors: list[Detector]) -> tuple[float, float, float, float]
     return xmin, xmax, ymin, ymax
 
 
-def vertical_extent(detectors: list[Detector]) -> float:
-    """Return the total vertical extent of the detector setup."""
+def bounding_box_3d(detectors: list[Detector]) -> tuple[float, float, float, float, float, float]:
+    """Return the global `(xmin, xmax, ymin, ymax, zmin, zmax)` detector bounding box."""
     _require_detectors(detectors)
 
-    zmins = [float(detector.lower_bounds[2]) for detector in detectors]
-    zmaxs = [float(detector.upper_bounds[2]) for detector in detectors]
-    return max(zmaxs) - min(zmins)
+    lower_stack = np.stack([detector.lower_bounds for detector in detectors])
+    upper_stack = np.stack([detector.upper_bounds for detector in detectors])
+
+    xmin = float(np.min(lower_stack[:, 0]))
+    xmax = float(np.max(upper_stack[:, 0]))
+    ymin = float(np.min(lower_stack[:, 1]))
+    ymax = float(np.max(upper_stack[:, 1]))
+    zmin = float(np.min(lower_stack[:, 2]))
+    zmax = float(np.max(upper_stack[:, 2]))
+    return xmin, xmax, ymin, ymax, zmin, zmax
 
 
-def generation_region(
-    detectors: list[Detector],
-    theta_max: float,
-) -> tuple[float, float, float, float, float]:
-    """Return the unbiased generation rectangle and its area.
+def enclosing_sphere(detectors: list[Detector], padding_factor: float = 1.01) -> tuple[np.ndarray, float]:
+    """Return the detector-stack enclosing sphere center and padded radius."""
+    if padding_factor <= 1.0:
+        raise ValueError("padding_factor must be greater than 1.0.")
 
-    The generation region is enlarged using the full vertical span of the
-    detector stack and the largest allowed zenith angle. This keeps the
-    sampling region independent of any detector logic expression.
-    """
-
-    xmin, xmax, ymin, ymax = bounding_box(detectors)
-    height = vertical_extent(detectors)
-    margin = height * math.tan(theta_max)
-
-    x_min_generation = xmin - margin
-    x_max_generation = xmax + margin
-    y_min_generation = ymin - margin
-    y_max_generation = ymax + margin
-
-    area = (x_max_generation - x_min_generation) * (y_max_generation - y_min_generation)
-    return x_min_generation, x_max_generation, y_min_generation, y_max_generation, area
+    xmin, xmax, ymin, ymax, zmin, zmax = bounding_box_3d(detectors)
+    center = np.array(
+        (
+            0.5 * (xmin + xmax),
+            0.5 * (ymin + ymax),
+            0.5 * (zmin + zmax),
+        ),
+        dtype=float,
+    )
+    diagonal = np.array((xmax - xmin, ymax - ymin, zmax - zmin), dtype=float)
+    radius = 0.5 * float(np.linalg.norm(diagonal)) * padding_factor
+    return center, radius
 
 
 def reference_z(detectors: list[Detector]) -> float:

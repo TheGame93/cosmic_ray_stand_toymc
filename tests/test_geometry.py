@@ -7,7 +7,13 @@ import unittest
 
 import numpy as np
 
-from toymc_cosmic.geometry import Detector, generation_region, intersect, reference_z, vertical_extent
+from toymc_cosmic.geometry import (
+    Detector,
+    bounding_box_3d,
+    enclosing_sphere,
+    intersect,
+    reference_z,
+)
 
 
 class GeometryTests(unittest.TestCase):
@@ -46,12 +52,28 @@ class GeometryTests(unittest.TestCase):
         crossed = intersect(origins, directions, [self.detector])
         self.assertFalse(crossed[0, 0])
 
-    def test_generation_region_uses_vertical_margin(self) -> None:
-        """The generation rectangle must grow with `tan(theta_max)`."""
+    def test_enclosing_sphere_covers_the_full_detector_box(self) -> None:
+        """The padded enclosing sphere must cover the detector stack corners."""
         upper_detector = Detector("T1", [0.0, 0.0, 10.0], [2.0, 2.0, 2.0], 1.0)
         lower_detector = Detector("T2", [0.0, 0.0, 0.0], [2.0, 2.0, 2.0], 1.0)
 
-        _, _, _, _, area = generation_region([upper_detector, lower_detector], math.radians(45.0))
-        self.assertGreater(area, 4.0)
-        self.assertAlmostEqual(vertical_extent([upper_detector, lower_detector]), 12.0)
+        bounds = bounding_box_3d([upper_detector, lower_detector])
+        center, radius = enclosing_sphere([upper_detector, lower_detector], padding_factor=1.01)
+
+        corners = np.array(
+            [
+                [bounds[0], bounds[2], bounds[4]],
+                [bounds[0], bounds[2], bounds[5]],
+                [bounds[0], bounds[3], bounds[4]],
+                [bounds[0], bounds[3], bounds[5]],
+                [bounds[1], bounds[2], bounds[4]],
+                [bounds[1], bounds[2], bounds[5]],
+                [bounds[1], bounds[3], bounds[4]],
+                [bounds[1], bounds[3], bounds[5]],
+            ]
+        )
+        distances = np.linalg.norm(corners - center[np.newaxis, :], axis=1)
+
+        self.assertTrue(np.all(distances < radius))
         self.assertAlmostEqual(reference_z([upper_detector, lower_detector]), 11.0)
+        self.assertAlmostEqual(radius, 0.5 * math.sqrt(2.0**2 + 2.0**2 + 12.0**2) * 1.01)

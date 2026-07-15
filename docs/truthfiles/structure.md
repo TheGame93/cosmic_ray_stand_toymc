@@ -14,14 +14,15 @@ Reading order follows the dependency graph, leaves first.
 Leaf modules (no internal dependencies):
 
 - **`geometry.py`** — axis-aligned `Detector` volumes (`center` ± `size/2`)
-  and ray/AABB crossing tests. Also computes the flat generation plane and
-  the enlarged generation region used by the cosmic source, plus the
-  `reference_z` / `min_reference_z` reference planes used by the cosmic and
-  beam sources respectively.
+  and ray/AABB crossing tests. Also computes detector bounding boxes, the
+  padded enclosing sphere used by the cosmic source, and the
+  `reference_z` / `min_reference_z` z references used by the beam source
+  and GUI display bounds.
 - **`angular.py`** — pluggable zenith-angle sampling models used by the
-  cosmic source. `Cos2AngularModel` (closed-form inverse-CDF for a
-  `cos^2(theta)` density) is the only one wired up today; `AngularModel`
-  (ABC) and `TabulatedAngularModel` exist for future use (see
+  cosmic source. `Cos2AngularModel` (closed-form inverse-CDF for the
+  downward-hemisphere marginal induced by a `cos^2(theta)` sky intensity)
+  is the only one wired up today; `AngularModel` (ABC) and
+  `TabulatedAngularModel` exist for future use (see
   `docs/truthfiles/goal.md`).
 - **`response.py`** — applies per-detector Bernoulli firing efficiency on top
   of a geometric crossing (`apply_response`).
@@ -43,8 +44,11 @@ Modules built on the leaves:
   (`generate`, `total_rate_hz`, `spatial_bounds`) plus `CosmicSourceModel`,
   `BeamSourceModel`, `ObjectSourceModel`, and the `build_source_model`
   dispatcher that turns a `SourceModelConfig` into the matching model.
-  Depends on `angular.py` + `geometry.py` (physics), `tracks.py` (return
-  container), and `config.py` (the config dataclasses it dispatches on).
+  `CosmicSourceModel` generates from a padded enclosing sphere, not from a
+  flat top plane; `ObjectSourceModel` is specifically a one-sided emitting
+  disk, not a generic radioactive volume. Depends on `angular.py` +
+  `geometry.py` (physics), `tracks.py` (return container), and `config.py`
+  (the config dataclasses it dispatches on).
 - **`simulation.py`** — orchestrates the full headless pipeline (seed
   resolution → chunked track generation via the configured source model →
   geometric intersection → response → aggregation) into one
@@ -101,7 +105,7 @@ guard that raises a friendly `RuntimeError` if PyVista isn't installed.
   `--geometry-only` entry point (`show_geometry_only`). `startup_view_up`
   picks the startup camera's up vector from the source type (`x`-up for
   `beam`, the usual `z`-up otherwise); `render_source_shape` draws the
-  source volume (sphere/cylinder/box) once for `object`-type sources only.
+  object source's emitting disk once for `object`-type sources only.
 - **`viewer.py`** — the `--event-display` entry point (`show_event_display`)
   and `EventDisplayController`, the PyVista-owning orchestrator that wires
   together navigation state, track clipping, buttons, and legend text.
@@ -124,11 +128,11 @@ cli.py
 The GUI touches these core modules directly: `config.py` (`Config`,
 detectors, conditionals, `source_model`), `geometry.py` (`Detector`,
 `bounding_box`), `logic.py` (`evaluate`, `extract_names`), `source.py`
-(`build_source_model`, used for its `spatial_bounds` and to gate the
-`object`-only source rendering), and `simulation.py` (`SimulationResult`,
-produced upstream by `cli.py` and passed in). It never imports `tracks.py`,
-`rates.py`, `response.py`, or `angular.py` directly — only via the
-already-computed `SimulationResult` or through `source.py`.
+(`build_source_model` in `viewer.py`, `SourceModel` in `track_bounds.py`),
+and `simulation.py` (`SimulationResult`, produced upstream by `cli.py` and
+passed in). It never imports `tracks.py`, `rates.py`, `response.py`, or
+`angular.py` directly — only via the already-computed `SimulationResult` or
+through `source.py`.
 
 ## Tests
 

@@ -8,7 +8,7 @@ import sys
 from typing import TextIO
 from typing import Sequence
 
-from .config import load_config
+from .config import BeamSourceConfig, CosmicSourceConfig, ObjectSourceConfig, load_config
 from .gui import show_event_display, show_geometry_only
 from .rates import conditional_probability, detector_rates, logic_rates
 from .simulation import run_simulation
@@ -73,10 +73,7 @@ def _validate_gui_arguments(parser: argparse.ArgumentParser, args: argparse.Name
 def _print_headless_summary(config, simulation_result) -> None:
     """Print the standard terminal summary for one simulation result."""
     print(f"Seed: {simulation_result.seed}")
-    print(
-        "Generated events: "
-        f"{simulation_result.n_events}  (source rate = {simulation_result.total_rate_hz:.6g} Hz)"
-    )
+    print(f"Generated events: {simulation_result.n_events}  ({_format_source_header(config.source_model)})")
     print()
 
     detector_rate_map = detector_rates(simulation_result)
@@ -168,6 +165,21 @@ def _format_probability(estimate) -> str:
         value_text = f"{estimate.value:.3f}"
         error_text = f"{estimate.error:.3f}"
     return f"{value_text} +/- {error_text} (n_cond={estimate.n_cond})"
+
+
+def _format_source_header(source_config) -> str:
+    """Format the source-specific header summary; returns text."""
+    if isinstance(source_config, CosmicSourceConfig):
+        return f"cosmic flux = {source_config.flux_hz_per_cm2:.6g} Hz/cm2"
+    if isinstance(source_config, BeamSourceConfig):
+        return f"beam flux = {source_config.flux_hz_per_cm2:.6g} Hz/cm2"
+    if isinstance(source_config, ObjectSourceConfig):
+        activity_text = "n/a" if source_config.activity_bq is None else f"{source_config.activity_bq:.6g} Bq"
+        return (
+            f"source activity = {activity_text}, "
+            f"front emission = {source_config.front_emission_rate_hz():.6g} Hz"
+        )
+    raise ValueError(f"Unsupported source config type: {type(source_config).__name__}")
 
 
 def _render_progress(

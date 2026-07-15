@@ -1,4 +1,4 @@
-"""Pluggable source models: turn a validated source config into (origin, direction) tracks."""
+"""Pluggable source models that turn validated configs into track samples."""
 
 from __future__ import annotations
 
@@ -9,12 +9,13 @@ import numpy as np
 
 from .angular import Cos2AngularModel
 from .config import BeamSourceConfig, CosmicSourceConfig, ObjectSourceConfig, SourceModelConfig
-from .geometry import Detector, generation_region, min_reference_z, reference_z
+from .geometry import Detector, enclosing_sphere, min_reference_z, reference_z
 from .tracks import Tracks
 
 
 _FWHM_TO_SIGMA = 2.0 * math.sqrt(2.0 * math.log(2.0))
 _GAUSSIAN_TRUNCATION_SIGMA_MULTIPLE = 5.0
+_COSMIC_ENCLOSING_SPHERE_PADDING_FACTOR = 1.01
 
 
 class SourceModel(ABC):
@@ -22,25 +23,24 @@ class SourceModel(ABC):
 
     @abstractmethod
     def generate(self, count: int, detectors: list[Detector], rng: np.random.Generator) -> Tracks:
-        """Generate `count` (origin, direction) tracks for this source."""
+        """Generate `count` source tracks; returns Tracks."""
 
     @abstractmethod
     def total_rate_hz(self, detectors: list[Detector]) -> float:
-        """Return the total physical event rate this source's sampling represents, in Hz."""
+        """Return the total physical event rate represented by the sampling, in Hz."""
 
     @abstractmethod
     def spatial_bounds(
         self, detectors: list[Detector]
     ) -> tuple[float, float, float, float, float, float]:
-        """Return this source's own axis-aligned footprint `(xmin,xmax,ymin,ymax,zmin,zmax)`."""
+        """Return the source footprint bounds `(xmin,xmax,ymin,ymax,zmin,zmax)`."""
 
 
 class CosmicSourceModel(SourceModel):
-    """Downward cosmic-ray source: `cos^2` zenith sampling over a flat generation plane."""
+    """Downward cosmic-ray source sampled from a padded enclosing sphere."""
 
-    def __init__(self, theta_max: float, model: str, flux_hz_per_cm2: float) -> None:
-        """Store the cosmic source parameters and build its angular model."""
-        self.theta_max = theta_max
+    def __init__(self, model: str, flux_hz_per_cm2: float) -> None:
+        """Store the cosmic source parameters and build the sky angular model."""
         self.model = model
         self.flux_hz_per_cm2 = flux_hz_per_cm2
         if model == "cos2":
@@ -48,48 +48,59 @@ class CosmicSourceModel(SourceModel):
         else:
             raise ValueError(f"Unsupported cosmic angular model: {model}")
 
-        self._cached_generation_region: tuple[float, float, float, float, float] | None = None
-        self._cached_reference_z: float | None = None
+        self._cached_sphere: tuple[np.ndarray, float] | None = None
 
     def generate(self, count: int, detectors: list[Detector], rng: np.random.Generator) -> Tracks:
-        """Sample tracks from a flat plane above the detector stack; returns Tracks."""
+        """Sample tracks from an enclosing sphere; returns Tracks."""
         if count <= 0:
             raise ValueError("count must be positive.")
 
-        if self._cached_generation_region is None:
-            self._cached_generation_region = generation_region(detectors, self.theta_max)
-            self._cached_reference_z = reference_z(detectors)
-        x_min, x_max, y_min, y_max, _ = self._cached_generation_region
-        z_origin = self._cached_reference_z
+        sphere_center, sphere_radius = self._enclosing_sphere(detectors)
 
-        x_positions = rng.uniform(x_min, x_max, size=count)
-        y_positions = rng.uniform(y_min, y_max, size=count)
-        z_positions = np.full(count, z_origin, dtype=float)
-
-        theta = self.angular_model.sample_theta(count, self.theta_max, rng)
+        theta = self.angular_model.sample_theta(count, rng)
         phi = rng.uniform(0.0, 2.0 * math.pi, size=count)
 
         sin_theta = np.sin(theta)
-        direction_x = sin_theta * np.cos(phi)
-        direction_y = sin_theta * np.sin(phi)
-        direction_z = -np.cos(theta)
+        directions = np.column_stack(
+            (
+                sin_theta * np.cos(phi),
+                sin_theta * np.sin(phi),
+                -np.cos(theta),
+            )
+        )
 
-        origins = np.column_stack((x_positions, y_positions, z_positions))
-        directions = np.column_stack((direction_x, direction_y, direction_z))
+        impact_offsets = _sample_disk_offsets_perpendicular_to_vectors(directions, sphere_radius, rng)
+        chord_lengths = np.sqrt(np.maximum(sphere_radius**2 - np.sum(impact_offsets**2, axis=1), 0.0))
+        origins = sphere_center + impact_offsets - chord_lengths[:, np.newaxis] * directions
         return Tracks(origins=origins, directions=directions)
 
     def total_rate_hz(self, detectors: list[Detector]) -> float:
-        """Return `flux_hz_per_cm2 * generation area`."""
-        _, _, _, _, area_gen = generation_region(detectors, self.theta_max)
-        return self.flux_hz_per_cm2 * area_gen
+        """Return the auxiliary sphere-entry rate implied by the configured plane flux."""
+        _, sphere_radius = self._enclosing_sphere(detectors)
+        return (4.0 / 3.0) * math.pi * sphere_radius**2 * self.flux_hz_per_cm2
 
     def spatial_bounds(
         self, detectors: list[Detector]
     ) -> tuple[float, float, float, float, float, float]:
-        """Return the generation rectangle at the flat origin plane's height."""
-        x_min, x_max, y_min, y_max, _ = generation_region(detectors, self.theta_max)
-        z_origin = reference_z(detectors)
-        return (x_min, x_max, y_min, y_max, z_origin, z_origin)
+        """Return the enclosing sphere's axis-aligned bounding box."""
+        sphere_center, sphere_radius = self._enclosing_sphere(detectors)
+        return (
+            float(sphere_center[0] - sphere_radius),
+            float(sphere_center[0] + sphere_radius),
+            float(sphere_center[1] - sphere_radius),
+            float(sphere_center[1] + sphere_radius),
+            float(sphere_center[2] - sphere_radius),
+            float(sphere_center[2] + sphere_radius),
+        )
+
+    def _enclosing_sphere(self, detectors: list[Detector]) -> tuple[np.ndarray, float]:
+        """Compute and cache the padded detector enclosing sphere; returns `(center, radius)`."""
+        if self._cached_sphere is None:
+            self._cached_sphere = enclosing_sphere(
+                detectors,
+                padding_factor=_COSMIC_ENCLOSING_SPHERE_PADDING_FACTOR,
+            )
+        return self._cached_sphere
 
 
 class BeamSourceModel(SourceModel):
@@ -130,17 +141,17 @@ class BeamSourceModel(SourceModel):
         return Tracks(origins=origins, directions=directions)
 
     def _uniform_radius(self) -> float:
-        """Return the `uniform`-profile disk radius."""
+        """Return the `uniform`-profile disk radius; returns float."""
         return 0.5 * self.size[0]
 
     def _gaussian_sigma(self) -> tuple[float, float]:
-        """Return the `gaussian`-profile `(sigma_x, sigma_y)` derived from the configured FWHM."""
+        """Return the `gaussian`-profile `(sigma_x, sigma_y)` derived from the FWHM."""
         return self.size[0] / _FWHM_TO_SIGMA, self.size[1] / _FWHM_TO_SIGMA
 
     def _sample_transverse_positions(
         self, count: int, rng: np.random.Generator
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Sample `(x, y)` transverse positions matching the configured profile."""
+        """Sample transverse `(x, y)` positions matching the configured profile."""
         if self.profile == "uniform":
             x_center, y_center = self.center
             radius = self._uniform_radius()
@@ -153,17 +164,7 @@ class BeamSourceModel(SourceModel):
     def _sample_gaussian_transverse_positions(
         self, count: int, rng: np.random.Generator
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Sample `(x, y)` from a 2D gaussian truncated to the `spatial_bounds` ellipse.
-
-        Truncating (instead of sampling a true unbounded normal) guarantees
-        every generated origin actually lies within `spatial_bounds`, which
-        both the GUI's display-box clipping and `total_rate_hz`'s
-        FWHM-ellipse-is-half-the-mass relationship depend on being exact.
-        Uses vectorized rejection sampling: at
-        `_GAUSSIAN_TRUNCATION_SIGMA_MULTIPLE = 5`, the per-sample rejection
-        probability is about 3.7e-6, so this converges in 1-2 iterations
-        even for millions of events.
-        """
+        """Sample a truncated 2D gaussian beam spot; returns `(x_positions, y_positions)`."""
         x_center, y_center = self.center
         sigma_x, sigma_y = self._gaussian_sigma()
 
@@ -190,16 +191,11 @@ class BeamSourceModel(SourceModel):
     def total_rate_hz(self, detectors: list[Detector]) -> float:
         """Return the source's total physical rate, in Hz."""
         if self.profile == "gaussian":
-            # The FWHM ellipse `_footprint_area` describes contains exactly
-            # half of an independent 2D gaussian's mass (semi-axis =
-            # FWHM/2 = 1.1774*sigma is the 2D-Rayleigh median radius in
-            # standardized units), so the total rate over the full sampled
-            # population is twice flux_hz_per_cm2 times that ellipse area.
             return 2.0 * self.flux_hz_per_cm2 * self._footprint_area()
         return self.flux_hz_per_cm2 * self._footprint_area()
 
     def _footprint_area(self) -> float:
-        """Return the disk (`uniform`) or FWHM-ellipse (`gaussian`) footprint area."""
+        """Return the beam footprint area used by the total-rate normalization; returns float."""
         if self.profile == "uniform":
             return math.pi * self._uniform_radius() ** 2
         return math.pi * (0.5 * self.size[0]) * (0.5 * self.size[1])
@@ -207,7 +203,7 @@ class BeamSourceModel(SourceModel):
     def spatial_bounds(
         self, detectors: list[Detector]
     ) -> tuple[float, float, float, float, float, float]:
-        """Return the beam's transverse footprint spanning from the upstream face to the far detector face."""
+        """Return the beam footprint bounds from the upstream face to the far detector face."""
         x_center, y_center = self.center
         if self.profile == "uniform":
             half_x = half_y = self._uniform_radius()
@@ -222,105 +218,123 @@ class BeamSourceModel(SourceModel):
 
 
 class ObjectSourceModel(SourceModel):
-    """Radioactive point/volume source emitting isotropically over the full 4*pi sphere."""
+    """Mounted one-sided disk source emitting into a forward hemisphere."""
 
     def __init__(
         self,
-        shape: str,
         center: tuple[float, float, float],
-        size: tuple[float, ...],
-        activity_hz: float,
+        diameter: float,
+        normal: tuple[float, float, float],
+        angular_model: str,
+        front_emission_rate_hz: float,
     ) -> None:
-        """Store the object source parameters."""
-        if shape not in ("sphere", "disk", "box"):
-            raise ValueError(f"Unsupported object shape: {shape}")
+        """Store the disk-source parameters and normalize its emitting normal."""
+        if angular_model not in ("uniform", "cosine-weighted"):
+            raise ValueError(f"Unsupported object angular model: {angular_model}")
 
-        self.shape = shape
-        self.center = center
-        self.size = size
-        self.activity_hz = activity_hz
+        self.center = np.asarray(center, dtype=float)
+        self.diameter = diameter
+        self.angular_model = angular_model
+        self.front_emission_rate_hz = front_emission_rate_hz
+        self.unit_normal = _normalize_vector(np.asarray(normal, dtype=float))
+        basis_u, basis_v = _orthonormal_basis_from_unit_vectors(self.unit_normal[np.newaxis, :])
+        self._basis_u = basis_u[0]
+        self._basis_v = basis_v[0]
 
     def generate(self, count: int, detectors: list[Detector], rng: np.random.Generator) -> Tracks:
-        """Sample emission points inside the volume and isotropic directions; returns Tracks."""
+        """Sample emission points on the disk and forward directions; returns Tracks."""
         if count <= 0:
             raise ValueError("count must be positive.")
 
         origins = self._sample_positions(count, rng)
-        directions = _sample_isotropic_directions(count, rng)
+        directions = self._sample_directions(count, rng)
         return Tracks(origins=origins, directions=directions)
 
     def _sample_positions(self, count: int, rng: np.random.Generator) -> np.ndarray:
-        """Sample emission points uniformly inside the configured volume."""
-        center = np.array(self.center, dtype=float)
+        """Sample emission points uniformly on the disk surface; returns ndarray."""
+        radius = 0.5 * self.diameter
+        r = radius * np.sqrt(rng.uniform(0.0, 1.0, size=count))
+        phi = rng.uniform(0.0, 2.0 * math.pi, size=count)
+        offsets = (
+            (r * np.cos(phi))[:, np.newaxis] * self._basis_u[np.newaxis, :]
+            + (r * np.sin(phi))[:, np.newaxis] * self._basis_v[np.newaxis, :]
+        )
+        return self.center[np.newaxis, :] + offsets
 
-        if self.shape == "sphere":
-            radius = 0.5 * self.size[0]
-            unit_directions = _sample_isotropic_directions(count, rng)
-            r = radius * np.cbrt(rng.uniform(0.0, 1.0, size=count))
-            offsets = unit_directions * r[:, np.newaxis]
-        elif self.shape == "disk":
-            radius = 0.5 * self.size[0]
-            half_height = 0.5 * self.size[1]
-            r = radius * np.sqrt(rng.uniform(0.0, 1.0, size=count))
-            phi = rng.uniform(0.0, 2.0 * math.pi, size=count)
-            offsets = np.column_stack(
-                (
-                    r * np.cos(phi),
-                    r * np.sin(phi),
-                    rng.uniform(-half_height, half_height, size=count),
-                )
-            )
+    def _sample_directions(self, count: int, rng: np.random.Generator) -> np.ndarray:
+        """Sample forward-hemisphere directions for the configured angular model; returns ndarray."""
+        if self.angular_model == "uniform":
+            cos_theta = rng.uniform(0.0, 1.0, size=count)
         else:
-            half_sizes = np.array(self.size, dtype=float) * 0.5
-            offsets = rng.uniform(-half_sizes, half_sizes, size=(count, 3))
+            cos_theta = np.sqrt(rng.uniform(0.0, 1.0, size=count))
 
-        return offsets + center
+        sin_theta = np.sqrt(1.0 - cos_theta**2)
+        phi = rng.uniform(0.0, 2.0 * math.pi, size=count)
+        return (
+            (sin_theta * np.cos(phi))[:, np.newaxis] * self._basis_u[np.newaxis, :]
+            + (sin_theta * np.sin(phi))[:, np.newaxis] * self._basis_v[np.newaxis, :]
+            + cos_theta[:, np.newaxis] * self.unit_normal[np.newaxis, :]
+        )
 
     def total_rate_hz(self, detectors: list[Detector]) -> float:
-        """Return the configured total activity, unchanged."""
-        return self.activity_hz
+        """Return the configured front-side particle emission rate, in Hz."""
+        return self.front_emission_rate_hz
 
     def spatial_bounds(
         self, detectors: list[Detector]
     ) -> tuple[float, float, float, float, float, float]:
-        """Return the source volume's own axis-aligned bounding box."""
-        x_center, y_center, z_center = self.center
-
-        if self.shape == "sphere":
-            half_x = half_y = half_z = 0.5 * self.size[0]
-        elif self.shape == "disk":
-            half_x = half_y = 0.5 * self.size[0]
-            half_z = 0.5 * self.size[1]
-        else:
-            half_x, half_y, half_z = (0.5 * component for component in self.size)
-
+        """Return the oriented emitting disk's axis-aligned bounds."""
+        radius = 0.5 * self.diameter
+        half_extents = radius * np.sqrt(np.maximum(1.0 - self.unit_normal**2, 0.0))
         return (
-            x_center - half_x,
-            x_center + half_x,
-            y_center - half_y,
-            y_center + half_y,
-            z_center - half_z,
-            z_center + half_z,
+            float(self.center[0] - half_extents[0]),
+            float(self.center[0] + half_extents[0]),
+            float(self.center[1] - half_extents[1]),
+            float(self.center[1] + half_extents[1]),
+            float(self.center[2] - half_extents[2]),
+            float(self.center[2] + half_extents[2]),
         )
 
 
-def _sample_isotropic_directions(count: int, rng: np.random.Generator) -> np.ndarray:
-    """Sample unit direction vectors uniformly over the full 4*pi sphere."""
-    cos_theta = rng.uniform(-1.0, 1.0, size=count)
-    sin_theta = np.sqrt(1.0 - cos_theta**2)
-    phi = rng.uniform(0.0, 2.0 * math.pi, size=count)
+def _sample_disk_offsets_perpendicular_to_vectors(
+    directions: np.ndarray,
+    radius: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Sample uniform disk offsets perpendicular to unit directions; returns ndarray."""
+    basis_u, basis_v = _orthonormal_basis_from_unit_vectors(directions)
+    radial_distance = radius * np.sqrt(rng.uniform(0.0, 1.0, size=directions.shape[0]))
+    azimuth = rng.uniform(0.0, 2.0 * math.pi, size=directions.shape[0])
+    return (
+        (radial_distance * np.cos(azimuth))[:, np.newaxis] * basis_u
+        + (radial_distance * np.sin(azimuth))[:, np.newaxis] * basis_v
+    )
 
-    direction_x = sin_theta * np.cos(phi)
-    direction_y = sin_theta * np.sin(phi)
-    direction_z = cos_theta
-    return np.column_stack((direction_x, direction_y, direction_z))
+
+def _orthonormal_basis_from_unit_vectors(unit_vectors: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Build orthonormal bases perpendicular to unit vectors; returns `(basis_u, basis_v)`."""
+    reference = np.tile(np.array((0.0, 0.0, 1.0), dtype=float), (unit_vectors.shape[0], 1))
+    near_parallel_mask = np.abs(unit_vectors[:, 2]) > 0.9
+    reference[near_parallel_mask] = np.array((1.0, 0.0, 0.0), dtype=float)
+
+    basis_u = np.cross(reference, unit_vectors)
+    basis_u /= np.linalg.norm(basis_u, axis=1)[:, np.newaxis]
+    basis_v = np.cross(unit_vectors, basis_u)
+    return basis_u, basis_v
+
+
+def _normalize_vector(vector: np.ndarray) -> np.ndarray:
+    """Normalize a non-zero vector; returns the normalized vector."""
+    norm = float(np.linalg.norm(vector))
+    if norm == 0.0:
+        raise ValueError("Vector must be non-zero.")
+    return vector / norm
 
 
 def build_source_model(source_config: SourceModelConfig) -> SourceModel:
-    """Build the concrete `SourceModel` matching a validated source config."""
+    """Build the concrete SourceModel matching a validated source config."""
     if isinstance(source_config, CosmicSourceConfig):
         return CosmicSourceModel(
-            theta_max=source_config.theta_max,
             model=source_config.model,
             flux_hz_per_cm2=source_config.flux_hz_per_cm2,
         )
@@ -333,9 +347,10 @@ def build_source_model(source_config: SourceModelConfig) -> SourceModel:
         )
     if isinstance(source_config, ObjectSourceConfig):
         return ObjectSourceModel(
-            shape=source_config.shape,
             center=source_config.center,
-            size=source_config.size,
-            activity_hz=source_config.activity_hz,
+            diameter=source_config.diameter,
+            normal=source_config.normal,
+            angular_model=source_config.angular_model,
+            front_emission_rate_hz=source_config.front_emission_rate_hz(),
         )
     raise ValueError(f"Unsupported source_model config type: {type(source_config).__name__}")

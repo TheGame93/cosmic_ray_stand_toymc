@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import pathlib
 import tempfile
 import textwrap
@@ -11,7 +10,6 @@ import unittest
 import numpy as np
 
 from toymc_cosmic.config import load_config
-from toymc_cosmic.geometry import generation_region
 from toymc_cosmic.logic import evaluate
 from toymc_cosmic.simulation import PROGRESS_UPDATE_INTERVAL, run_simulation
 
@@ -19,13 +17,13 @@ from toymc_cosmic.simulation import PROGRESS_UPDATE_INTERVAL, run_simulation
 class SimulationTests(unittest.TestCase):
     """Check end-to-end simulation sanity conditions."""
 
-    def test_total_rate_hz_matches_flux_times_generation_area(self) -> None:
-        """SimulationResult.total_rate_hz must match the cosmic source's flux * area_gen."""
+    def test_thin_horizontal_detector_rate_matches_flux_times_area(self) -> None:
+        """A thin `10 x 10 cm^2` detector under unit cosmic flux should sit near `100 Hz`."""
         config = load_config(self._write_config())
         result = run_simulation(config)
 
-        _, _, _, _, area_gen = generation_region(config.detectors, math.radians(80.0))
-        self.assertAlmostEqual(result.total_rate_hz, 0.01 * area_gen)
+        detector_rate = (result.total_rate_hz * np.count_nonzero(result.crossed["T1"]) / result.n_events)
+        self.assertAlmostEqual(detector_rate, 100.0, delta=10.0)
 
     def test_fired_events_are_subset_of_crossed_events(self) -> None:
         """Detector response must never create fired events without a crossing."""
@@ -74,25 +72,24 @@ class SimulationTests(unittest.TestCase):
 
         self.assertEqual(progress_calls, [(2000, 2000, 100.0)])
 
-    def _write_config(self, n_events: int = 2000) -> pathlib.Path:
+    def _write_config(self, n_events: int = 200000) -> pathlib.Path:
         """Write a small but non-trivial simulation config file."""
         config_text = f"""
         seed: 11
         source_model:
           type: cosmic
           model: cos2
-          theta_max_deg: 80.0
-          flux_hz_per_cm2: 0.01
+          flux_hz_per_cm2: 1.0
         monte_carlo:
           n_events: {n_events}
         detectors:
           - name: T1
             center: [0, 0, 10]
-            size: [10, 10, 1]
+            size: [10, 10, 0.1]
             efficiency: 0.9
           - name: T2
             center: [0, 0, 0]
-            size: [10, 10, 1]
+            size: [10, 10, 0.1]
             efficiency: 0.8
         logic:
           expressions:

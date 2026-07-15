@@ -50,5 +50,9 @@ intent.
 Similarly, the `beam` source's `divergence` profile has no implementation
 yet: `config.py` rejects `profile: divergence` with `ConfigError` at
 load time, same as any other not-yet-supported option in this codebase.
-The `object` source's isotropic 4*pi emission has no collimation option —
-a future addition, not modeled today.
+
+The `object` source is intentionally narrower in scope than before: it
+models only a mounted one-sided emitting disk, not arbitrary radioactive
+volumes. The placeholder `angular_model: material-dependent` path is
+rejected at load time with `ConfigError`; only `uniform` and
+`cosine-weighted` forward-hemisphere emission are implemented today.

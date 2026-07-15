@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 import unittest
 
 import numpy as np
@@ -17,15 +16,14 @@ class AngularTests(unittest.TestCase):
         """The sampled distribution should match the analytic CDF reasonably well."""
         rng = np.random.default_rng(12345)
         model = Cos2AngularModel()
-        theta_max = math.radians(80.0)
 
-        samples = model.sample_theta(30000, theta_max, rng)
+        samples = model.sample_theta(30000, rng)
         self.assertTrue(np.all(samples >= 0.0))
-        self.assertTrue(np.all(samples <= theta_max))
+        self.assertTrue(np.all(samples <= (0.5 * np.pi)))
 
-        grid = np.linspace(0.0, theta_max, 20)
+        grid = np.linspace(0.0, 0.5 * np.pi, 20)
         empirical_cdf = np.array([np.mean(samples <= value) for value in grid])
-        expected_cdf = (1.0 - np.cos(grid) ** 4) / (1.0 - math.cos(theta_max) ** 4)
+        expected_cdf = 1.0 - np.cos(grid) ** 3
 
         max_deviation = np.max(np.abs(empirical_cdf - expected_cdf))
         self.assertLess(max_deviation, 0.03)

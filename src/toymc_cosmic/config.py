@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 import pathlib
 from typing import Any
 
@@ -23,15 +22,14 @@ class SourceModelConfig:
 
 @dataclass(frozen=True)
 class CosmicSourceConfig(SourceModelConfig):
-    """Cosmic-ray source settings: zenith-angle sampling over a downward cone.
+    """Cosmic-ray source settings for a downward sky intensity model.
 
     Attributes:
-        theta_max: Maximum zenith angle in radians.
         model: Angular model name; only `"cos2"` is supported today.
-        flux_hz_per_cm2: Total downward flux over the simulated angular cone.
+        flux_hz_per_cm2: Total real downward plane flux through a horizontal
+            area, integrated over the full sky hemisphere.
     """
 
-    theta_max: float
     model: str
     flux_hz_per_cm2: float
 
@@ -57,20 +55,33 @@ class BeamSourceConfig(SourceModelConfig):
 
 @dataclass(frozen=True)
 class ObjectSourceConfig(SourceModelConfig):
-    """Radioactive point/volume source settings; emits isotropically over 4*pi.
+    """Mounted disk source settings for one-sided hemisphere emission.
 
     Attributes:
-        shape: Volume shape: `"sphere"`, `"disk"`, or `"box"`.
-        center: Volume center `(xc, yc, zc)`.
-        size: Shape size parameters (`sphere`: `[diameter]`, `disk`:
-            `[diameter_xy, wz]`, `box`: `[wx, wy, wz]`).
-        activity_hz: Total emission rate in Hz.
+        center: Disk center `(xc, yc, zc)`.
+        diameter: Emitting disk diameter.
+        normal: Emitting-side surface normal; normalized internally later.
+        angular_model: Forward-hemisphere angular model.
+        activity_bq: Optional intrinsic source activity in Bq.
+        yield_per_decay: Number of relevant particles emitted per decay.
+        surface_emission_rate_hz: Optional front-side particle emission rate.
     """
 
-    shape: str
     center: tuple[float, float, float]
-    size: tuple[float, ...]
-    activity_hz: float
+    diameter: float
+    normal: tuple[float, float, float]
+    angular_model: str
+    activity_bq: float | None
+    yield_per_decay: float
+    surface_emission_rate_hz: float | None
+
+    def front_emission_rate_hz(self) -> float:
+        """Return the front-side particle emission rate; returns float."""
+        if self.surface_emission_rate_hz is not None:
+            return self.surface_emission_rate_hz
+        if self.activity_bq is None:
+            raise ValueError("activity_bq must be present when no surface_emission_rate_hz is configured.")
+        return 0.5 * self.activity_bq * self.yield_per_decay
 
 
 @dataclass(frozen=True)
@@ -169,7 +180,7 @@ def _read_optional_seed(value: Any) -> int | None:
 
 
 _BEAM_PROFILE_SIZE_LENGTHS = {"uniform": 1, "gaussian": 2}
-_OBJECT_SHAPE_SIZE_LENGTHS = {"sphere": 1, "disk": 2, "box": 3}
+_OBJECT_ANGULAR_MODELS = {"uniform", "cosine-weighted"}
 
 
 def _parse_source_model(raw_source_model: Any) -> SourceModelConfig:
@@ -189,21 +200,13 @@ def _parse_source_model(raw_source_model: Any) -> SourceModelConfig:
 
 def _parse_cosmic_source(raw: dict[str, Any]) -> CosmicSourceConfig:
     """Parse a `source_model.type: cosmic` block."""
-    theta_max_deg = _read_float(raw.get("theta_max_deg"), "source_model.theta_max_deg")
-    if not 0.0 < theta_max_deg < 90.0:
-        raise ConfigError("source_model.theta_max_deg must be between 0 and 90.")
-
     model = raw.get("model")
     if model != "cos2":
         raise ConfigError("Only source_model.model = 'cos2' is supported for type 'cosmic'.")
 
     flux_hz_per_cm2 = _read_positive_float(raw.get("flux_hz_per_cm2"), "source_model.flux_hz_per_cm2")
 
-    return CosmicSourceConfig(
-        theta_max=math.radians(theta_max_deg),
-        model=model,
-        flux_hz_per_cm2=flux_hz_per_cm2,
-    )
+    return CosmicSourceConfig(model=model, flux_hz_per_cm2=flux_hz_per_cm2)
 
 
 def _parse_beam_source(raw: dict[str, Any]) -> BeamSourceConfig:
@@ -223,17 +226,55 @@ def _parse_beam_source(raw: dict[str, Any]) -> BeamSourceConfig:
 
 def _parse_object_source(raw: dict[str, Any]) -> ObjectSourceConfig:
     """Parse a `source_model.type: object` block."""
-    shape = raw.get("shape")
-    if shape not in _OBJECT_SHAPE_SIZE_LENGTHS:
-        raise ConfigError("source_model.shape must be one of 'sphere', 'disk', 'box'.")
-
     center = _read_float_tuple(raw.get("center"), 3, "source_model.center")
-    size = _read_float_tuple(
-        raw.get("size"), _OBJECT_SHAPE_SIZE_LENGTHS[shape], "source_model.size", positive=True
-    )
-    activity_hz = _read_positive_float(raw.get("activity_hz"), "source_model.activity_hz")
+    diameter = _read_positive_float(raw.get("diameter"), "source_model.diameter")
+    normal = _read_float_tuple(raw.get("normal"), 3, "source_model.normal")
+    if all(component == 0.0 for component in normal):
+        raise ConfigError("source_model.normal must not be the zero vector.")
 
-    return ObjectSourceConfig(shape=shape, center=center, size=size, activity_hz=activity_hz)
+    angular_model = raw.get("angular_model")
+    if angular_model == "material-dependent":
+        raise ConfigError("source_model.angular_model = 'material-dependent' is not yet implemented.")
+    if angular_model not in _OBJECT_ANGULAR_MODELS:
+        raise ConfigError(
+            "source_model.angular_model must be one of 'uniform', 'cosine-weighted', 'material-dependent'."
+        )
+
+    activity_raw = raw.get("activity_bq")
+    activity_bq = (
+        _read_positive_float(activity_raw, "source_model.activity_bq")
+        if activity_raw is not None
+        else None
+    )
+
+    emission_raw = raw.get("surface_emission_rate_hz")
+    surface_emission_rate_hz = (
+        _read_positive_float(emission_raw, "source_model.surface_emission_rate_hz")
+        if emission_raw is not None
+        else None
+    )
+
+    if activity_bq is None and surface_emission_rate_hz is None:
+        raise ConfigError(
+            "At least one of source_model.activity_bq or source_model.surface_emission_rate_hz must be provided."
+        )
+
+    yield_raw = raw.get("yield_per_decay", 1.0)
+    yield_per_decay = _read_positive_float(yield_raw, "source_model.yield_per_decay")
+    if activity_bq is None and "yield_per_decay" in raw:
+        raise ConfigError(
+            "source_model.yield_per_decay requires source_model.activity_bq because it only affects the derived emission rate."
+        )
+
+    return ObjectSourceConfig(
+        center=center,
+        diameter=diameter,
+        normal=normal,
+        angular_model=angular_model,
+        activity_bq=activity_bq,
+        yield_per_decay=yield_per_decay,
+        surface_emission_rate_hz=surface_emission_rate_hz,
+    )
 
 
 def _read_float_tuple(

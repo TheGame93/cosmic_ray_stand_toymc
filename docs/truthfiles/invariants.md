@@ -13,20 +13,26 @@ figure out which before proceeding.
 - `source_model.type` is a required, discriminated union: `"cosmic"`,
   `"beam"`, or `"object"`; anything else raises `ConfigError`. Exactly one
   source is active per run — there is no multi-source config shape.
-  - `cosmic` → `CosmicSourceConfig`: `theta_max_deg` must satisfy
-    `0 < theta_max_deg < 90` (strict both ends), converted to radians
-    (`theta_max`) at load time; `model` only accepts `"cos2"`;
-    `flux_hz_per_cm2` must be `> 0`.
+  - `cosmic` → `CosmicSourceConfig`: `model` only accepts `"cos2"`;
+    `flux_hz_per_cm2` must be `> 0` and means the real total downward
+    plane flux through a horizontal area, integrated over the full sky
+    hemisphere.
   - `beam` → `BeamSourceConfig`: `profile` must be `"uniform"` or
     `"gaussian"` (`"divergence"` is rejected with `ConfigError` — not yet
     implemented, see `docs/truthfiles/goal.md`); `center` is a 2-element
     `(xc, yc)` list; `size` length must match the profile (`uniform`: 1,
     `gaussian`: 2) with all components `> 0`; `flux_hz_per_cm2` must be
     `> 0`.
-  - `object` → `ObjectSourceConfig`: `shape` must be `"sphere"`, `"disk"`,
-    or `"box"`; `center` is a 3-element `(xc, yc, zc)` list; `size` length
-    must match the shape (`sphere`: 1, `disk`: 2, `box`: 3) with all
-    components `> 0`; `activity_hz` must be `> 0`.
+  - `object` → `ObjectSourceConfig`: `center` is a 3-element
+    `(xc, yc, zc)` list; `diameter` must be `> 0`; `normal` is a 3-element
+    vector and must not be the zero vector; `angular_model` accepts
+    `"uniform"` or `"cosine-weighted"` and hard-rejects
+    `"material-dependent"` as not yet implemented; at least one of
+    `activity_bq` or `surface_emission_rate_hz` must be present; if
+    `yield_per_decay` is provided without `activity_bq`, config loading
+    raises `ConfigError`. If `surface_emission_rate_hz` is present, it is
+    treated as the authoritative front-side emission rate and overrides the
+    derived `0.5 * activity_bq * yield_per_decay`.
 - `monte_carlo.n_events` must be a positive int (`bool` values are explicitly
   rejected, since `bool` is a subclass of `int` in Python).
 - `detectors` must be a non-empty list; each needs a non-empty, unique
@@ -55,25 +61,29 @@ figure out which before proceeding.
 - Crossing (`intersect`) is a **strictly interior** slab-method ray/AABB
   test: surface-only, edge-only, and corner-only touches are explicitly
   excluded, not counted as a crossing.
-- `generation_region` enlarges the detector bounding box by
-  `margin = vertical_extent * tan(theta_max)` on all four x/y sides,
-  independent of any logic expression. Only used by `CosmicSourceModel`.
-- `reference_z` is the highest detector's top z bound (the cosmic source's
-  downward-origin plane); `min_reference_z` is the lowest detector's bottom
-  z bound (the beam source's upstream-origin plane). Every cosmic/beam
-  track originates from one of these two flat planes, regardless of
-  individual detector heights.
+- `bounding_box_3d` returns the full detector-stack axis-aligned bounds.
+- `enclosing_sphere` returns the center of that 3D box together with the
+  half-diagonal radius multiplied by a caller-provided padding factor
+  (`> 1.0` required). `CosmicSourceModel` uses this to build its finite
+  auxiliary generation surface.
+- `reference_z` is the highest detector's top z bound; `min_reference_z` is
+  the lowest detector's bottom z bound. `BeamSourceModel` uses
+  `min_reference_z` as its upstream origin plane, and GUI display bounds
+  use both z references for the detector stack extent.
 
 ## Angular (`angular.py`)
 
-- `sample_theta` always returns radians over `[0, theta_max]`.
-- `theta_max` must satisfy `0 < theta_max < pi/2` (strict both ends).
-- `Cos2AngularModel` implements the closed-form inverse-CDF for density
-  `cos^2(theta)`; it's the only model reachable from config today, wired up
-  through `CosmicSourceModel`.
+- `sample_theta` always returns radians over the downward hemisphere
+  `[0, pi/2]`, and `count` must be strictly positive.
+- `Cos2AngularModel` implements the closed-form inverse-CDF for the
+  incoming-direction marginal `p(theta) = 3 cos^2(theta) sin(theta)`,
+  corresponding to a sky intensity `I(theta) ∝ cos^2(theta)` seen through
+  a horizontal plane. It's the only model reachable from config today,
+  wired up through `CosmicSourceModel`.
 - `TabulatedAngularModel` (`grid_size >= 3`, non-negative weights, positive
   normalization) exists but is not wired to config — see
-  `docs/truthfiles/goal.md`.
+  `docs/truthfiles/goal.md`. Its physical hemisphere density is built as
+  `weight_function(theta) * sin(theta)`.
 
 ## Tracks (`tracks.py`)
 
@@ -83,20 +93,21 @@ figure out which before proceeding.
 
 ## Source (`source.py`)
 
-- `SourceModel.generate` requires `count > 0`. `CosmicSourceModel`/
-  `BeamSourceModel` cache their detector-derived geometry
-  (`generation_region`/`reference_z`, `min_reference_z` respectively) on
-  first `generate()` call — safe because `detectors` never changes across
-  chunks within one `run_simulation` call, but means a `SourceModel`
-  instance must not be reused across two different detector lists.
+- `SourceModel.generate` requires `count > 0`. `CosmicSourceModel` and
+  `BeamSourceModel` cache detector-derived geometry on first use
+  (enclosing sphere for cosmic, `min_reference_z` for beam) — safe because
+  `detectors` never changes across chunks within one `run_simulation`
+  call, but means a `SourceModel` instance must not be reused across two
+  different detector lists.
 - **`CosmicSourceModel`**: `model` must be `"cos2"` (validated again at
   construction time, not just in `config.py`) and is what selects
-  `Cos2AngularModel`. origin `(x, y)` uniform over `generation_region`, `z`
-  fixed at `reference_z`; direction `direction_z = -cos(theta)` with
-  `theta` from the configured angular model and `phi` uniform over
-  `[0, 2*pi)` — tracks point **downward** (negative z), unchanged from the
-  engine's original single-source behavior. `total_rate_hz = flux_hz_per_cm2
-  * area_gen`.
+  `Cos2AngularModel`. Each sampled direction points **downward**
+  (`direction_z = -cos(theta)`), with `phi` uniform over `[0, 2*pi)` and
+  `theta` from the configured angular model. Origins are sampled on a
+  padded enclosing sphere: the code chooses a uniform impact point on the
+  disk perpendicular to the direction and back-propagates to the sphere
+  entry point. `total_rate_hz = (4/3) * pi * R^2 * flux_hz_per_cm2`, where
+  `R` is the padded enclosing-sphere radius.
 - **`BeamSourceModel`**: origin `z` fixed at `min_reference_z` (upstream
   face); direction is exactly `(0, 0, +1)` for every event (no angular
   spread) — the beam travels `-z -> +z`, opposite the cosmic source's
@@ -118,15 +129,16 @@ figure out which before proceeding.
     semi-axis `FWHM/2 = 1.1774*sigma` is the 2D-Rayleigh median radius in
     standardized units), so the total rate over the full population is
     twice `flux_hz_per_cm2` times that ellipse area.
-- **`ObjectSourceModel`**: origin sampled uniformly inside the configured
-  volume (`sphere`: closed-form `r = R*u**(1/3)` with an isotropic unit
-  vector; `disk`: uniform in a cylinder, `r = R*sqrt(u)` in-plane and
-  uniform along `z`; `box`: independent uniforms per axis, no rejection
-  sampling anywhere). Direction is isotropic over the full 4*pi sphere
-  (`cos(theta) ~ U(-1,1)`, `phi ~ U(0, 2*pi)`), not just a downward
-  hemisphere. `total_rate_hz = activity_hz` directly, independent of
-  detector geometry. No collimation exists yet. `shape` must be `"sphere"`,
-  `"disk"`, or `"box"` (validated again at construction time).
+- **`ObjectSourceModel`**: models a one-sided mounted disk only. The
+  configured `normal` is normalized internally; origins are sampled
+  uniformly on the disk surface with `r = R*sqrt(u)` in a local orthonormal
+  basis perpendicular to that normal. Directions are sampled only into the
+  forward hemisphere (`direction dot normal > 0`):
+  - `uniform`: hemisphere-uniform, `cos(theta) ~ U(0, 1)`.
+  - `cosine-weighted`: Lambert-like, `cos(theta) = sqrt(u)`.
+  `total_rate_hz` equals the configured front-side emission rate, either
+  supplied directly as `surface_emission_rate_hz` or derived from
+  `0.5 * activity_bq * yield_per_decay`.
 - `build_source_model` dispatches on the config dataclass's Python type
   (`CosmicSourceConfig` / `BeamSourceConfig` / `ObjectSourceConfig`) via
   `isinstance`.
@@ -198,6 +210,13 @@ figure out which before proceeding.
   `argparse.error` (nonzero exit), not an exception.
 - The headless summary always prints, even in `--event-display` GUI mode —
   only `--geometry-only` skips running the simulation entirely.
+- The second headless-summary line always prints source-specific physical
+  normalization text, not a generic source rate:
+  - `cosmic` → `cosmic flux = ... Hz/cm2`
+  - `beam` → `beam flux = ... Hz/cm2`
+  - `object` → `source activity = ... Bq, front emission = ... Hz`
+    (or `source activity = n/a` if only `surface_emission_rate_hz` was
+    configured)
 - Rate formatting uses `config.output.detector_rate_decimals` /
   `logic_rate_decimals`; probability formatting is hard-coded to 3 decimals
   and prints the literal text `"nan"` when the value is `NaN`.
@@ -235,10 +254,11 @@ figure out which before proceeding.
   (`x`-up) for `source_model.type: beam`, else the default `(0, 0, 1)`
   (`z`-up). Applies to both `--geometry-only` and `--event-display`.
 - **Object source rendering**: `render_source_shape` draws exactly one mesh
-  (sphere/cylinder/box matching `shape`) for `source_model.type: object`,
-  colored by `gui.source_color` (default `orange`) and `gui.source_opacity`
-  (default `0.25`, must be in `[0, 1]`); a no-op for `cosmic`/`beam`. Drawn
-  once in `build_plotter`, not redrawn per event.
+  (a `pyvista.Disc` matching `center`, `diameter`, and `normal`) for
+  `source_model.type: object`, colored by `gui.source_color` (default
+  `orange`) and `gui.source_opacity` (default `0.25`, must be in `[0, 1]`);
+  a no-op for `cosmic`/`beam`. Drawn once in `build_plotter`, not redrawn
+  per event.
 - **Display-box padding**: `compute_display_bounds` pads every axis of the
   detector-bounds ∪ source-`spatial_bounds` union by 10% of that axis's own
   span or magnitude (whichever is larger) — the same formula on all three

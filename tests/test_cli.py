@@ -10,11 +10,13 @@ from toymc_cosmic.cli import (
     _format_detector_rate_table,
     _format_probability,
     _format_rate_hz,
+    _format_source_header,
     _render_progress,
     _validate_gui_arguments,
     build_parser,
     main,
 )
+from toymc_cosmic.config import BeamSourceConfig, CosmicSourceConfig, ObjectSourceConfig
 from toymc_cosmic.geometry import Detector
 from toymc_cosmic.rates import ProbabilityEstimate, RateEstimate
 
@@ -48,6 +50,56 @@ class CliTests(unittest.TestCase):
         """Conditional probabilities should use per-thousand precision."""
         estimate = ProbabilityEstimate(value=0.941176, error=0.00619, n_joint=1, n_cond=1445)
         self.assertEqual(_format_probability(estimate), "0.941 +/- 0.006 (n_cond=1445)")
+
+    def test_source_header_formats_cosmic_flux(self) -> None:
+        """Cosmic headers should report the configured plane flux."""
+        self.assertEqual(
+            _format_source_header(CosmicSourceConfig(model="cos2", flux_hz_per_cm2=0.01)),
+            "cosmic flux = 0.01 Hz/cm2",
+        )
+
+    def test_source_header_formats_beam_flux(self) -> None:
+        """Beam headers should report the configured beam flux."""
+        self.assertEqual(
+            _format_source_header(
+                BeamSourceConfig(profile="uniform", center=(0.0, 0.0), size=(1.0,), flux_hz_per_cm2=3.5)
+            ),
+            "beam flux = 3.5 Hz/cm2",
+        )
+
+    def test_source_header_formats_object_activity_and_front_emission(self) -> None:
+        """Object headers should report both activity and front emission when known."""
+        self.assertEqual(
+            _format_source_header(
+                ObjectSourceConfig(
+                    center=(0.0, 0.0, 0.0),
+                    diameter=1.0,
+                    normal=(0.0, 0.0, 1.0),
+                    angular_model="uniform",
+                    activity_bq=1000.0,
+                    yield_per_decay=0.5,
+                    surface_emission_rate_hz=None,
+                )
+            ),
+            "source activity = 1000 Bq, front emission = 250 Hz",
+        )
+
+    def test_source_header_formats_object_activity_as_na_when_missing(self) -> None:
+        """Object headers should print `n/a` when only the front-emission override is known."""
+        self.assertEqual(
+            _format_source_header(
+                ObjectSourceConfig(
+                    center=(0.0, 0.0, 0.0),
+                    diameter=1.0,
+                    normal=(0.0, 0.0, 1.0),
+                    angular_model="uniform",
+                    activity_bq=None,
+                    yield_per_decay=1.0,
+                    surface_emission_rate_hz=12.5,
+                )
+            ),
+            "source activity = n/a, front emission = 12.5 Hz",
+        )
 
     def test_detector_rate_table_contains_three_columns(self) -> None:
         """Detector output should be printed as one combined table."""
