@@ -1,4 +1,4 @@
-"""Top-level simulation orchestration for the engine."""
+"""Run one fixed-geometry Monte Carlo simulation; returns SimulationResult."""
 
 from __future__ import annotations
 
@@ -54,7 +54,7 @@ def run_simulation(
             simulation chunk. The callback receives the processed event count,
             the total event count, and the completion fraction in percent.
     """
-    seed = config.seed if config.seed is not None else int(time.time() * 1000)
+    seed = resolve_seed(config.seed)
     rng = np.random.default_rng(seed)
 
     source_model = build_source_model(config.source_model)
@@ -115,3 +115,10 @@ def run_simulation(
         seed=seed,
         n_events=config.monte_carlo.n_events,
     )
+
+
+def resolve_seed(config_seed: int | None) -> int:
+    """Resolve one config seed into a concrete integer; returns int."""
+    if config_seed is not None:
+        return config_seed
+    return int(time.time() * 1000)

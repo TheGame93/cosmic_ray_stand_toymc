@@ -38,6 +38,16 @@ figure out which before proceeding.
 - `detectors` must be a non-empty list; each needs a non-empty, unique
   `name`; construction delegates to `Detector` (see Geometry below) and
   wraps any `ValueError` into `ConfigError`.
+  - `center` accepts either a legacy 3-element list or a structured mapping.
+    Structured `center` must use exactly one of:
+    - `value` + `sigma`
+    - `value` + `common_group` + optional `extra_sigma`
+    `center.sigma` is mutually exclusive with `common_group` /
+    `extra_sigma`; `extra_sigma` without `common_group` raises
+    `ConfigError`; unknown keys in structured `center` raise `ConfigError`.
+  - `size` accepts either a legacy 3-element list or a structured mapping.
+    Structured `size` uses `value` + optional `sigma` only; unknown keys
+    raise `ConfigError`.
 - `logic.expressions` and `logic.conditional` entries are validated by
   parsing through `logic.extract_names` and rejecting references to unknown
   detector names, at load time (before any simulation runs).
@@ -47,6 +57,21 @@ figure out which before proceeding.
   field.
 - `seed`: optional int or `null`. `null` means "resolve from local time at
   runtime" — the actual resolution happens in `simulation.py`, not here.
+- `systematics.geometry`: optional mapping for detector-geometry replicas.
+  - `n_replicas` must be a positive int.
+  - `seed` is an optional int or `null`.
+  - `common_groups` is an optional mapping of named shared center shifts.
+    Each group currently supports `center.sigma` only, which must be a
+    3-element numeric vector with component-wise non-negative entries.
+  - If any detector declares geometry-uncertainty fields but
+    `systematics.geometry` is absent, config loading raises `ConfigError`.
+  - If `systematics.geometry` is present, `monte_carlo.n_events` must be at
+    least `1 + n_replicas`.
+  - If `systematics.geometry` is present but there is no effective nonzero
+    geometry uncertainty anywhere, config loading raises `ConfigError`.
+  - A detector is geometry-variable iff it has a nonzero `center.sigma`,
+    nonzero `center.extra_sigma`, nonzero `size.sigma`, or references a
+    `common_group` whose shared `center.sigma` has any nonzero component.
 - `output.detector_rate_decimals` / `output.logic_rate_decimals` default to
   `1`, must be non-negative ints.
 - The `gui:` section is preserved as an opaque `dict[str, Any] | None` — no
@@ -178,20 +203,27 @@ figure out which before proceeding.
 - `binomial_probability`: `n_cond >= 0`, `n_joint >= 0`,
   `n_joint <= n_cond`; if `n_cond == 0` it returns `nan`/`nan` rather than
   raising (explicit divide-by-zero guard).
+- `RateEstimate` and `ProbabilityEstimate` keep `error` as the main public
+  uncertainty field, and now also carry `stat_error`, optional
+  `syst_error`, and optional `quality_warning`. When no systematic summary is
+  attached, `stat_error == error` and `syst_error is None`.
 - `detector_rates` and `logic_rates` always compute **both** `"geometric"`
   (from `simulation_result.crossed`) and `"fired"` (from
   `simulation_result.fired`) — this pair is the concrete geometric/fired
   duality reported throughout the CLI and GUI.
 - `conditional_probability`'s `mode` parameter (`"fired"` or `"geometric"`,
   default `"fired"`) is the one place mode is a runtime choice — `cli.py`
-  calls it twice, once per mode, to report both.
+  calls it twice, once per mode, to report both. All three public helpers can
+  optionally attach geometry-systematics summaries, combining
+  `stat_error` and `syst_error` in quadrature.
 
 ## Simulation (`simulation.py`)
 
-- `seed = config.seed if config.seed is not None else int(time.time()*1000)`
-  — a `null`/omitted seed makes the run non-deterministic; an explicit int
-  seed makes it fully reproducible via `np.random.default_rng(seed)`. The
-  *resolved* seed is always a concrete int on `SimulationResult.seed`.
+- `resolve_seed(config.seed)` implements the engine's seed rule:
+  `config.seed` when explicit, otherwise `int(time.time()*1000)`. A
+  `null`/omitted seed makes the run non-deterministic; an explicit int makes
+  it fully reproducible via `np.random.default_rng(seed)`. The *resolved*
+  seed is always a concrete int on `SimulationResult.seed`.
 - Events are processed in `PROGRESS_UPDATE_INTERVAL` (1,000,000) chunks so
   large `n_events` runs can report progress; chunks are concatenated back
   into full arrays at the end regardless (chunking is for progress
@@ -203,6 +235,43 @@ figure out which before proceeding.
   detector name — the same naming scheme used by logic expressions and the
   GUI.
 
+## Geometry systematics (`geometry_systematics.py`)
+
+- `geometry_systematics.py` is an orchestration layer around the fixed-geometry
+  engine; it does not change `Detector` or the semantics of
+  `run_simulation(config, ...)`.
+- `monte_carlo.n_events` is the *global* event budget when geometry
+  systematics are enabled:
+  - `total_runs = 1 + n_replicas`
+  - `replica_events = floor(n_events / total_runs)`
+  - `nominal_events = n_events - n_replicas * replica_events`
+  The remainder stays on the nominal run.
+- Two seed roles are kept separate:
+  - Monte Carlo seeds come from the resolved MC seed (`resolve_seed`) and
+    deterministic `+ replica_index` offsets for the replicas.
+  - Geometry perturbation draws come from `systematics.geometry.seed` when
+    explicit, otherwise from a deterministic value derived from the resolved
+    MC seed; replica geometry RNGs use deterministic `+ replica_index`
+    offsets from that geometry seed.
+- Replica detector perturbations are gaussian only.
+  - Shared center shifts are sampled once per common group per replica.
+  - Local `center.sigma` and `center.extra_sigma` are sampled independently.
+  - `size.sigma` samples are resampled until every perturbed size component is
+    strictly positive.
+- Central values always come from the nominal-geometry run. `syst_error` is
+  the replica RMS spread around that nominal value:
+  `sqrt(mean((q_k - q_0)^2))`.
+- Geometry-systematics summaries are attached only to observables that depend
+  on at least one geometry-variable detector:
+  - detector rates: only that detector
+  - logic rates: any referenced detector in the expression
+  - conditional probabilities: any referenced detector in `numerator` or
+    `given`
+- Sparse-replica warnings appear only when the minimum relevant replica count
+  is below `20`:
+  - rates / logic rates: `replica_min_n_pass=...`
+  - conditional probabilities: `replica_min_n_cond=...`
+
 ## CLI (`cli.py`)
 
 - `--geometry-only` and `--event-display` are mutually exclusive and both
@@ -210,6 +279,15 @@ figure out which before proceeding.
   `argparse.error` (nonzero exit), not an exception.
 - The headless summary always prints, even in `--event-display` GUI mode —
   only `--geometry-only` skips running the simulation entirely.
+- When geometry systematics are enabled, `cli.py` runs the nominal result plus
+  replicas through `geometry_systematics.py`, prints:
+  - the resolved MC seed
+  - the resolved geometry seed
+  - the configured total event count
+  - the nominal event count
+  - the replica layout as `N x M events`
+  and still sends only the nominal `SimulationResult` to the GUI
+  `--event-display` path.
 - The second headless-summary line always prints source-specific physical
   normalization text, not a generic source rate:
   - `cosmic` → `cosmic flux = ... Hz/cm2`
@@ -220,6 +298,11 @@ figure out which before proceeding.
 - Rate formatting uses `config.output.detector_rate_decimals` /
   `logic_rate_decimals`; probability formatting is hard-coded to 3 decimals
   and prints the literal text `"nan"` when the value is `NaN`.
+  - Unaffected observables keep the short nominal-only format.
+  - Affected observables print total uncertainty plus the split
+    `(stat ... syst ...)`.
+  - Sparse-replica warnings are appended as `[replica_min_n_pass=...]` or
+    `[replica_min_n_cond=...]` only when present.
 
 ## GUI cross-cutting
 

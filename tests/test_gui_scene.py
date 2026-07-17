@@ -335,7 +335,12 @@ class FakePyVistaModule:
 
     @staticmethod
     def Disc(
-        *, center: tuple[float, ...], inner: float, outer: float, normal: tuple[float, ...]
+        *,
+        center: tuple[float, ...],
+        inner: float,
+        outer: float,
+        normal: tuple[float, ...],
+        c_res: int | None = None,
     ) -> tuple[str, tuple[float, ...], float, float, tuple[float, ...]]:
         """Return a simple tuple so tests can assert that a mesh was created."""
         return ("disc", center, inner, outer, normal)

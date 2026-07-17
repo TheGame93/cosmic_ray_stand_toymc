@@ -1,4 +1,4 @@
-"""Terminal entry point for the headless engine."""
+"""Run the terminal entry point for the engine; returns process exit code."""
 
 from __future__ import annotations
 
@@ -9,13 +9,18 @@ from typing import TextIO
 from typing import Sequence
 
 from .config import BeamSourceConfig, CosmicSourceConfig, ObjectSourceConfig, load_config
+from .geometry_systematics import (
+    GeometrySystematicsResult,
+    geometry_systematics_enabled,
+    run_geometry_systematics,
+)
 from .gui import show_event_display, show_geometry_only
 from .rates import conditional_probability, detector_rates, logic_rates
 from .simulation import run_simulation
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Build the CLI argument parser."""
+    """Build the CLI argument parser; returns ArgumentParser."""
     parser = argparse.ArgumentParser(description="Run the toy cosmic-ray Monte Carlo engine.")
     parser.add_argument("config", help="Path to the YAML configuration file.")
     parser.add_argument(
@@ -38,7 +43,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI either in headless or GUI mode; returns the process exit code."""
+    """Run the CLI either in headless or GUI mode; returns int."""
     parser = build_parser()
     args = parser.parse_args(argv)
     _validate_gui_arguments(parser, args)
@@ -49,8 +54,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         show_geometry_only(config)
         return 0
 
-    simulation_result = run_simulation(config, progress_callback=_render_progress)
-    _print_headless_summary(config, simulation_result)
+    geometry_result: GeometrySystematicsResult | None = None
+    if geometry_systematics_enabled(config):
+        geometry_result = run_geometry_systematics(config, progress_callback=_render_progress)
+        simulation_result = geometry_result.nominal_result
+    else:
+        simulation_result = run_simulation(config, progress_callback=_render_progress)
+
+    if geometry_result is None:
+        _print_headless_summary(config, simulation_result)
+    else:
+        _print_headless_summary(config, simulation_result, geometry_result=geometry_result)
 
     if args.gui and args.event_display:
         try:
@@ -62,7 +76,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _validate_gui_arguments(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    """Reject incompatible GUI argument combinations."""
+    """Reject incompatible GUI argument combinations; returns None."""
     gui_mode_requested = args.geometry_only or args.event_display
     if gui_mode_requested and not args.gui:
         parser.error("--geometry-only and --event-display require --gui.")
@@ -70,13 +84,23 @@ def _validate_gui_arguments(parser: argparse.ArgumentParser, args: argparse.Name
         parser.error("--gui requires either --geometry-only or --event-display.")
 
 
-def _print_headless_summary(config, simulation_result) -> None:
-    """Print the standard terminal summary for one simulation result."""
+def _print_headless_summary(config, simulation_result, geometry_result: GeometrySystematicsResult | None = None) -> None:
+    """Print the standard terminal summary for one simulation path; returns None."""
     print(f"Seed: {simulation_result.seed}")
-    print(f"Generated events: {simulation_result.n_events}  ({_format_source_header(config.source_model)})")
+    if geometry_result is None:
+        print(f"Generated events: {simulation_result.n_events}  ({_format_source_header(config.source_model)})")
+    else:
+        event_split = geometry_result.event_split
+        print(f"Geometry seed: {geometry_result.geometry_seed}")
+        print(f"Generated events: {event_split.total_events}  ({_format_source_header(config.source_model)})")
+        print(f"Nominal events: {event_split.nominal_events}")
+        print(f"Geometry replicas: {event_split.n_replicas} x {event_split.replica_events} events")
     print()
 
-    detector_rate_map = detector_rates(simulation_result)
+    detector_rate_map = detector_rates(
+        simulation_result,
+        systematic_summaries=None if geometry_result is None else geometry_result.detector_rate_summaries,
+    )
     print("Detector rates:")
     print(
         _format_detector_rate_table(
@@ -89,8 +113,14 @@ def _print_headless_summary(config, simulation_result) -> None:
 
     if config.logic_expressions:
         print("Logic expressions:")
-        for expression in config.logic_expressions:
-            rate_map = logic_rates(expression, simulation_result)
+        for index, expression in enumerate(config.logic_expressions):
+            rate_map = logic_rates(
+                expression,
+                simulation_result,
+                systematic_summaries=None
+                if geometry_result is None
+                else geometry_result.logic_rate_summaries[index],
+            )
             geometric_rate = rate_map["geometric"]
             fired_rate = rate_map["fired"]
             print(
@@ -102,18 +132,23 @@ def _print_headless_summary(config, simulation_result) -> None:
 
     if config.conditionals:
         print("Conditional probabilities:")
-        for conditional in config.conditionals:
+        for index, conditional in enumerate(config.conditionals):
+            conditional_summaries = (
+                None if geometry_result is None else geometry_result.conditional_probability_summaries[index]
+            )
             fired_estimate = conditional_probability(
                 conditional.numerator,
                 conditional.given,
                 simulation_result,
                 mode="fired",
+                systematic_summary=None if conditional_summaries is None else conditional_summaries["fired"],
             )
             geometric_estimate = conditional_probability(
                 conditional.numerator,
                 conditional.given,
                 simulation_result,
                 mode="geometric",
+                systematic_summary=None if conditional_summaries is None else conditional_summaries["geometric"],
             )
             print(f"  {conditional.name}")
             print(f"    fired:     {_format_probability(fired_estimate)}")
@@ -125,7 +160,7 @@ def _format_detector_rate_table(
     detector_rate_map: dict[str, dict],
     rate_decimals: int,
 ) -> str:
-    """Return a detector rate table with aligned geometric and fired columns."""
+    """Build the detector rate table with aligned columns; returns str."""
     detector_names = [detector.name for detector in simulation_result.detectors]
     geometric_texts = [
         _format_rate_hz(detector_rate_map[name]["geometric"], rate_decimals)
@@ -151,24 +186,51 @@ def _format_detector_rate_table(
 
 
 def _format_rate_hz(estimate, decimals: int) -> str:
-    """Format a rate estimate with a configurable number of decimal digits."""
+    """Format one rate estimate for terminal output; returns str."""
     format_spec = f".{decimals}f"
-    return f"{format(estimate.value, format_spec)} +/- {format(estimate.error, format_spec)} Hz"
+    if estimate.syst_error is None:
+        base_text = f"{format(estimate.value, format_spec)} +/- {format(estimate.error, format_spec)} Hz"
+    else:
+        base_text = (
+            f"{format(estimate.value, format_spec)} +/- {format(estimate.error, format_spec)} "
+            f"(stat {format(estimate.stat_error, format_spec)} syst {format(estimate.syst_error, format_spec)}) Hz"
+        )
+    return _append_quality_warning(base_text, estimate.quality_warning)
 
 
 def _format_probability(estimate) -> str:
-    """Format a conditional probability with per-thousand precision."""
-    if math.isnan(estimate.value):
-        value_text = "nan"
-        error_text = "nan"
+    """Format one conditional-probability estimate for terminal output; returns str."""
+    if estimate.syst_error is None:
+        base_text = (
+            f"{_format_probability_number(estimate.value)} +/- {_format_probability_number(estimate.error)} "
+            f"(n_cond={estimate.n_cond})"
+        )
     else:
-        value_text = f"{estimate.value:.3f}"
-        error_text = f"{estimate.error:.3f}"
-    return f"{value_text} +/- {error_text} (n_cond={estimate.n_cond})"
+        base_text = (
+            f"{_format_probability_number(estimate.value)} +/- {_format_probability_number(estimate.error)} "
+            f"(stat {_format_probability_number(estimate.stat_error)} "
+            f"syst {_format_probability_number(estimate.syst_error)}) "
+            f"(n_cond={estimate.n_cond})"
+        )
+    return _append_quality_warning(base_text, estimate.quality_warning)
+
+
+def _format_probability_number(value: float | None) -> str:
+    """Format one probability-like number with fixed precision; returns str."""
+    if value is None or math.isnan(value):
+        return "nan"
+    return f"{value:.3f}"
+
+
+def _append_quality_warning(base_text: str, quality_warning: str | None) -> str:
+    """Append one sparse-replica warning when needed; returns str."""
+    if quality_warning is None:
+        return base_text
+    return f"{base_text} [{quality_warning}]"
 
 
 def _format_source_header(source_config) -> str:
-    """Format the source-specific header summary; returns text."""
+    """Format the source-specific header summary; returns str."""
     if isinstance(source_config, CosmicSourceConfig):
         return f"cosmic flux = {source_config.flux_hz_per_cm2:.6g} Hz/cm2"
     if isinstance(source_config, BeamSourceConfig):
@@ -188,19 +250,10 @@ def _render_progress(
     percent_complete: float,
     stream: TextIO = sys.stdout,
 ) -> None:
-    """Render a single-line progress indicator for the CLI.
-
-    The simulation may run for a long time at large event counts. This helper
-    keeps the user informed without printing a full history of progress lines.
-    """
-
-    progress_text = (
-        f"\rProgress: {processed_events} / {total_events} ({percent_complete:.2f}%)"
-    )
+    """Render one single-line progress indicator; returns None."""
+    progress_text = f"\rProgress: {processed_events} / {total_events} ({percent_complete:.2f}%)"
     stream.write(progress_text)
 
-    # Flush immediately so the terminal shows the updated counter while the
-    # simulation is still running.
     if processed_events >= total_events:
         stream.write("\n")
     stream.flush()

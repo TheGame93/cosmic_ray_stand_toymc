@@ -39,7 +39,9 @@ Modules built on the leaves:
   `logic.py` (cross-checking expression names against detector names). Owns
   the `source_model` discriminated union (`CosmicSourceConfig` /
   `BeamSourceConfig` / `ObjectSourceConfig`, under the `SourceModelConfig`
-  marker base) alongside the other small config dataclasses.
+  marker base) alongside the other small config dataclasses. Also parses the
+  optional geometry-systematics schema (`systematics.geometry`) and keeps
+  nominal detector geometry separate from per-detector uncertainty metadata.
 - **`source.py`** — pluggable source models: the `SourceModel` ABC
   (`generate`, `total_rate_hz`, `spatial_bounds`) plus `CosmicSourceModel`,
   `BeamSourceModel`, `ObjectSourceModel`, and the `build_source_model`
@@ -54,20 +56,31 @@ Modules built on the leaves:
   geometric intersection → response → aggregation) into one
   `SimulationResult`. Depends on `config.py`, `geometry.py`, `response.py`,
   `source.py`, `tracks.py`.
+- **`geometry_systematics.py`** — orchestration layer for optional detector
+  geometry replicas. Resolves the shared event budget into nominal plus
+  replica runs, perturbs detector geometry, streams replicas one at a time,
+  and accumulates per-observable systematic summaries without storing all
+  replica results. Depends on `config.py`, `geometry.py`, `logic.py`,
+  `rates.py`, `simulation.py`.
 - **`rates.py`** — turns raw pass/fail counts into Hz rates and conditional
   probabilities with binomial uncertainties (`detector_rates`, `logic_rates`,
-  `conditional_probability`). Depends on `logic.py` (and on `simulation.py`
-  only under `TYPE_CHECKING`, to avoid a runtime circular import).
-- **`cli.py`** — composition root. Wires `config.py` → `simulation.py` →
-  `rates.py` → formatted stdout, and is the only core module that imports
-  the `gui/` package.
+  `conditional_probability`). Also attaches optional geometry-systematics
+  summaries onto the nominal statistical estimates. Depends on `logic.py`
+  (and on `simulation.py` only under `TYPE_CHECKING`, to avoid a runtime
+  circular import).
+- **`cli.py`** — composition root. Wires nominal-only configs through
+  `simulation.py`, geometry-enabled configs through `geometry_systematics.py`,
+  then formats stdout through `rates.py`. It is the only core module that
+  imports the `gui/` package, and GUI event display still receives the nominal
+  `SimulationResult` only.
 
 ```
 config.py      -> geometry.py, logic.py
 source.py      -> angular.py, config.py, geometry.py, tracks.py
 simulation.py  -> config.py, geometry.py, response.py, source.py, tracks.py
+geometry_systematics.py -> config.py, geometry.py, logic.py, rates.py, simulation.py
 rates.py       -> logic.py   (+ simulation.py only under TYPE_CHECKING)
-cli.py         -> config.py, rates.py, simulation.py, gui/
+cli.py         -> config.py, geometry_systematics.py, rates.py, simulation.py, gui/
 ```
 
 `src/toymc_cosmic/__init__.py` re-exports the public engine surface:
@@ -75,8 +88,9 @@ cli.py         -> config.py, rates.py, simulation.py, gui/
 `CosmicSourceConfig`, `Detector`, `ObjectSourceConfig`,
 `ProbabilityEstimate`, `RateEstimate`, `SimulationResult`,
 `SourceModelConfig`, `Tracks`, `load_config`, `run_simulation`. Note
-`angular.py`, `logic.py`, `response.py`, `source.py`, and `cli.py` are *not*
-re-exported at package level — they're internal to the pipeline.
+`angular.py`, `logic.py`, `response.py`, `source.py`,
+`geometry_systematics.py`, and `cli.py` are *not* re-exported at package
+level — they're internal to the pipeline.
 
 ## GUI subpackage (`gui/`)
 

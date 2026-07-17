@@ -1,0 +1,81 @@
+seed: 123456
+
+source_model:
+  type: cosmic
+  model: cos2           # only supported model today
+  flux_hz_per_cm2: 0.01 # cosmic flux over a thin surface
+
+monte_carlo:
+  n_events: 4000000
+
+systematics:
+  geometry:
+    n_replicas: 100
+
+detectors:
+  - name: T1
+    center:
+      value: [0.0, 0.0, 13.0]
+      sigma: [0.1, 0.1, 0.2]
+    size:
+      value: [10.0, 10.0, 0.9]
+      sigma: [ 0.2,  0.2, 0.2]
+    efficiency: 0.8
+  - name: T3
+    center:
+      value: [0.0, 0.0, 7.0]
+      sigma: [0.2, 0.2, 0.5]
+    size:
+      value: [ 5.6,  5.0, 0.9]
+      sigma: [ 0.2,  0.2, 0.2]
+    efficiency: 0.8
+  - name: D1
+    center:
+      value: [0.0, 0.0,  6.0]
+      sigma: [0.0, 0.0,  0.5]
+    size: [ 6.0,  5.0, 0.3]
+    efficiency: 1
+  - name: T2
+    center:
+      value: [0.0, 0.0, 0.0]
+      sigma: [0.1, 0.1, 0.2]
+    size:
+      value: [10.0, 10.0, 0.9]
+      sigma: [ 0.2,  0.2, 0.2]
+    efficiency: 0.8
+
+logic:
+  expressions:
+    - "T1 and T2"
+    - "T1 and T2 and T3"
+  conditional:
+    - name: "D1|T1*T2"
+      numerator: "D1"
+      given: "T1 and T2"
+    - name: "D1|T1*T2*T3"
+      numerator: "D1"
+      given: "T1 and T2 and T3"
+
+output:
+  detector_rate_decimals: 3
+  logic_rate_decimals: 3
+
+gui:
+  # Accepted color examples:
+  # - named colors such as black, lightgray, orange, lime
+  # - named colors reference: Matplotlib named colors
+  #   https://matplotlib.org/stable/gallery/color/named_colors.html
+  # - hex strings such as "#ff8800"
+  # - RGB triples such as [0.2, 0.6, 1.0]
+  background_color: white
+  default_detector_color: lightgray
+  detector_colors:
+    T1: black
+    T3: black
+    D1: gold
+    T2: black
+  default_track_color: black
+  track_color_geometric_only: black      # given true geometrically, but false in fired mode
+  track_color_fired_given_only: red       # given true in fired mode, numerator false
+  track_color_fired_joint: green          # given true in fired mode, numerator true
+  line_width: 4.0

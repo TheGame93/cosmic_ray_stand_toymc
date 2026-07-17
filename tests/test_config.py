@@ -11,6 +11,7 @@ from toymc_cosmic.config import (
     BeamSourceConfig,
     ConfigError,
     CosmicSourceConfig,
+    GeometrySystematicsConfig,
     ObjectSourceConfig,
     load_config,
 )
@@ -46,6 +47,214 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(config.seed, 1)
         self.assertEqual(config.logic_expressions, ["T1"])
         self.assertIsInstance(config.source_model, CosmicSourceConfig)
+
+    def test_structured_detector_geometry_loads_with_independent_uncertainties(self) -> None:
+        """Structured detector geometry should parse nominal values and uncertainty metadata separately."""
+        config = load_config(
+            self._write_config(
+                """
+                source_model:
+                  type: cosmic
+                  model: cos2
+                  flux_hz_per_cm2: 0.01
+                monte_carlo:
+                  n_events: 20
+                systematics:
+                  geometry:
+                    n_replicas: 2
+                detectors:
+                  - name: D1
+                    center:
+                      value: [0.0, 0.0, 5.0]
+                      sigma: [0.2, 0.2, 0.2]
+                    size:
+                      value: [10.0, 10.0, 0.3]
+                      sigma: [0.1, 0.1, 0.0]
+                    efficiency: 0.8
+                """
+            )
+        )
+
+        self.assertIsInstance(config.geometry_systematics, GeometrySystematicsConfig)
+        self.assertEqual(tuple(config.detectors[0].center.tolist()), (0.0, 0.0, 5.0))
+        self.assertEqual(tuple(config.detectors[0].size.tolist()), (10.0, 10.0, 0.3))
+        metadata = config.detector_systematics["D1"]
+        assert metadata.center is not None
+        assert metadata.size is not None
+        self.assertEqual(metadata.center.sigma, (0.2, 0.2, 0.2))
+        self.assertIsNone(metadata.center.common_group)
+        self.assertEqual(metadata.size.sigma, (0.1, 0.1, 0.0))
+
+    def test_center_common_group_and_extra_sigma_load(self) -> None:
+        """Structured center metadata should support common plus local uncertainty."""
+        config = load_config(
+            self._write_config(
+                """
+                source_model:
+                  type: cosmic
+                  model: cos2
+                  flux_hz_per_cm2: 0.01
+                monte_carlo:
+                  n_events: 20
+                systematics:
+                  geometry:
+                    n_replicas: 2
+                    common_groups:
+                      telescope:
+                        center:
+                          sigma: [0.3, 0.3, 0.5]
+                detectors:
+                  - name: D2
+                    center:
+                      value: [0.0, 0.0, 5.0]
+                      common_group: telescope
+                      extra_sigma: [0.2, 0.2, 0.2]
+                    size: [10.0, 10.0, 0.3]
+                    efficiency: 0.8
+                """
+            )
+        )
+
+        metadata = config.detector_systematics["D2"]
+        assert metadata.center is not None
+        self.assertEqual(metadata.center.common_group, "telescope")
+        self.assertEqual(metadata.center.extra_sigma, (0.2, 0.2, 0.2))
+        assert config.geometry_systematics is not None
+        self.assertEqual(config.geometry_systematics.common_groups["telescope"].center.sigma, (0.3, 0.3, 0.5))
+
+    def test_detector_geometry_fields_require_systematics_block(self) -> None:
+        """Detector uncertainty metadata should require `systematics.geometry`."""
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write_config(
+                    """
+                    source_model:
+                      type: cosmic
+                      model: cos2
+                      flux_hz_per_cm2: 0.01
+                    monte_carlo:
+                      n_events: 100
+                    detectors:
+                      - name: D1
+                        center:
+                          value: [0.0, 0.0, 5.0]
+                          sigma: [0.2, 0.2, 0.2]
+                        size: [10.0, 10.0, 0.3]
+                        efficiency: 0.8
+                    """
+                )
+            )
+
+    def test_systematics_geometry_requires_effective_nonzero_uncertainty(self) -> None:
+        """Geometry systematics should fail when every declared sigma is effectively zero."""
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write_config(
+                    """
+                    source_model:
+                      type: cosmic
+                      model: cos2
+                      flux_hz_per_cm2: 0.01
+                    monte_carlo:
+                      n_events: 20
+                    systematics:
+                      geometry:
+                        n_replicas: 2
+                    detectors:
+                      - name: D1
+                        center:
+                          value: [0.0, 0.0, 5.0]
+                          sigma: [0.0, 0.0, 0.0]
+                        size:
+                          value: [10.0, 10.0, 0.3]
+                          sigma: [0.0, 0.0, 0.0]
+                        efficiency: 0.8
+                    """
+                )
+            )
+
+    def test_unknown_geometry_common_group_raises(self) -> None:
+        """Structured center metadata should reject missing common groups."""
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write_config(
+                    """
+                    source_model:
+                      type: cosmic
+                      model: cos2
+                      flux_hz_per_cm2: 0.01
+                    monte_carlo:
+                      n_events: 20
+                    systematics:
+                      geometry:
+                        n_replicas: 2
+                    detectors:
+                      - name: D2
+                        center:
+                          value: [0.0, 0.0, 5.0]
+                          common_group: telescope
+                        size: [10.0, 10.0, 0.3]
+                        efficiency: 0.8
+                    """
+                )
+            )
+
+    def test_geometry_enabled_requires_enough_total_events(self) -> None:
+        """Geometry systematics should reserve at least one event per run."""
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write_config(
+                    """
+                    source_model:
+                      type: cosmic
+                      model: cos2
+                      flux_hz_per_cm2: 0.01
+                    monte_carlo:
+                      n_events: 2
+                    systematics:
+                      geometry:
+                        n_replicas: 2
+                    detectors:
+                      - name: D1
+                        center:
+                          value: [0.0, 0.0, 5.0]
+                          sigma: [0.2, 0.2, 0.2]
+                        size: [10.0, 10.0, 0.3]
+                        efficiency: 0.8
+                    """
+                )
+            )
+
+    def test_center_sigma_cannot_be_combined_with_common_group(self) -> None:
+        """Structured center metadata should reject mutually exclusive uncertainty forms."""
+        with self.assertRaises(ConfigError):
+            load_config(
+                self._write_config(
+                    """
+                    source_model:
+                      type: cosmic
+                      model: cos2
+                      flux_hz_per_cm2: 0.01
+                    monte_carlo:
+                      n_events: 20
+                    systematics:
+                      geometry:
+                        n_replicas: 2
+                        common_groups:
+                          telescope:
+                            center:
+                              sigma: [0.3, 0.3, 0.5]
+                    detectors:
+                      - name: D2
+                        center:
+                          value: [0.0, 0.0, 5.0]
+                          sigma: [0.2, 0.2, 0.2]
+                          common_group: telescope
+                        size: [10.0, 10.0, 0.3]
+                        efficiency: 0.8
+                    """
+                )
+            )
 
     def test_output_precision_settings_load(self) -> None:
         """Output precision settings should load from the YAML file."""

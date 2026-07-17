@@ -16,7 +16,7 @@ from toymc_cosmic.cli import (
     build_parser,
     main,
 )
-from toymc_cosmic.config import BeamSourceConfig, CosmicSourceConfig, ObjectSourceConfig
+from toymc_cosmic.config import BeamSourceConfig, CosmicSourceConfig, GeometrySystematicsConfig, ObjectSourceConfig
 from toymc_cosmic.geometry import Detector
 from toymc_cosmic.rates import ProbabilityEstimate, RateEstimate
 
@@ -46,10 +46,42 @@ class CliTests(unittest.TestCase):
         estimate = RateEstimate(value=0.123456, error=0.004321, n_pass=1, n_total=1)
         self.assertEqual(_format_rate_hz(estimate, 3), "0.123 +/- 0.004 Hz")
 
+    def test_rate_formatter_includes_stat_and_syst_when_present(self) -> None:
+        """Rate text should expand when geometry-systematics fields are present."""
+        estimate = RateEstimate(
+            value=0.123456,
+            error=0.005000,
+            n_pass=1,
+            n_total=1,
+            stat_error=0.003000,
+            syst_error=0.004000,
+            quality_warning="replica_min_n_pass=7",
+        )
+        self.assertEqual(
+            _format_rate_hz(estimate, 3),
+            "0.123 +/- 0.005 (stat 0.003 syst 0.004) Hz [replica_min_n_pass=7]",
+        )
+
     def test_probability_formatter_uses_three_decimal_digits(self) -> None:
         """Conditional probabilities should use per-thousand precision."""
         estimate = ProbabilityEstimate(value=0.941176, error=0.00619, n_joint=1, n_cond=1445)
         self.assertEqual(_format_probability(estimate), "0.941 +/- 0.006 (n_cond=1445)")
+
+    def test_probability_formatter_includes_stat_and_syst_when_present(self) -> None:
+        """Conditional probability text should expand when systematics are present."""
+        estimate = ProbabilityEstimate(
+            value=0.500,
+            error=0.050,
+            n_joint=5,
+            n_cond=10,
+            stat_error=0.030,
+            syst_error=0.040,
+            quality_warning="replica_min_n_cond=3",
+        )
+        self.assertEqual(
+            _format_probability(estimate),
+            "0.500 +/- 0.050 (stat 0.030 syst 0.040) (n_cond=10) [replica_min_n_cond=3]",
+        )
 
     def test_source_header_formats_cosmic_flux(self) -> None:
         """Cosmic headers should report the configured plane flux."""
@@ -205,6 +237,34 @@ class CliTests(unittest.TestCase):
         run_simulation_mock.assert_called_once()
         print_summary_mock.assert_called_once_with(config, simulation_result)
         show_event_display_mock.assert_called_once_with(config, simulation_result)
+
+    @mock.patch("toymc_cosmic.cli._print_headless_summary")
+    @mock.patch("toymc_cosmic.cli.show_event_display")
+    @mock.patch("toymc_cosmic.cli.run_geometry_systematics")
+    @mock.patch("toymc_cosmic.cli.run_simulation")
+    @mock.patch("toymc_cosmic.cli.load_config")
+    def test_event_display_mode_uses_nominal_result_when_geometry_systematics_are_enabled(
+        self,
+        load_config_mock: mock.Mock,
+        run_simulation_mock: mock.Mock,
+        run_geometry_systematics_mock: mock.Mock,
+        show_event_display_mock: mock.Mock,
+        print_summary_mock: mock.Mock,
+    ) -> None:
+        """Event-display GUI mode should feed the GUI only the nominal result under geometry systematics."""
+        config = mock.Mock(geometry_systematics=GeometrySystematicsConfig(n_replicas=2, seed=3))
+        nominal_result = object()
+        geometry_result = mock.Mock(nominal_result=nominal_result)
+        load_config_mock.return_value = config
+        run_geometry_systematics_mock.return_value = geometry_result
+
+        exit_code = main(["config.yaml", "--gui", "--event-display"])
+
+        self.assertEqual(exit_code, 0)
+        run_geometry_systematics_mock.assert_called_once()
+        run_simulation_mock.assert_not_called()
+        print_summary_mock.assert_called_once_with(config, nominal_result, geometry_result=geometry_result)
+        show_event_display_mock.assert_called_once_with(config, nominal_result)
 
     @mock.patch("toymc_cosmic.cli._print_headless_summary")
     @mock.patch("toymc_cosmic.cli.show_event_display")

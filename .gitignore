@@ -12,6 +12,8 @@ docs/human/
 *.log.*
 tests/log/
 TODO.md
+HANDOFF*
+handoff*
 
 # Environments
 .env

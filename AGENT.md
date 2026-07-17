@@ -16,9 +16,9 @@ GEANT4. Full scope/non-goals: `docs/truthfiles/goal.md`.
 ## Running things
 
 ```bash
-./run_toymc.sh configs/example.yaml                       # headless
-./run_toymc.sh configs/example.yaml --gui --geometry-only  # 3D geometry view
-./run_toymc.sh configs/example.yaml --gui --event-display  # track-by-track view
+./run_toymc.sh configs/example_cosmic.yaml                       # headless
+./run_toymc.sh configs/example_cosmic.yaml --gui --geometry-only  # 3D geometry view
+./run_toymc.sh configs/example_cosmic.yaml --gui --event-display  # track-by-track view
 ```
 
 First run creates `.venv/` and installs `requirements.txt`; later runs

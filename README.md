@@ -31,7 +31,7 @@
     <td align="center" width="33%"><img src="docs/images/example_object.png" width="100%" alt="Given false, numerator true"></td>
   </tr>
   <tr>
-    <td align="center"><strong>Particle Beam</strong><br> setups</td>
+    <td align="center"><strong>Particle Beam Setups</strong></td>
     <td align="center"><strong>Radioactive Sources</strong><br></td>
   </tr>
 </table>
@@ -205,18 +205,82 @@ The engine is configured through YAML.
 </details>
 
 <details>
-<summary><strong>Detector fields</strong></summary>
+<summary><strong>Config header</strong></summary>
 
-Each detector entry must contain:
+A common header is:
 
-- `name`: unique detector name used in logic expressions
-- `center`: `[x, y, z]`
-- `size`: `[dx, dy, dz]`
-- `efficiency`: number between `0` and `1`
+```YAML
+seed: 123456
+
+source_model:
+  # see later for the choice of the source
+
+monte_carlo:
+  n_events: 2000000
+
+systematics:
+  # optional, for propagate geometrical uncertainties
+
+```
 
 </details>
 
-<details open>
+<details>
+<summary><strong>Detector fields</strong></summary>
+
+Valid detector entry:
+
+```yaml
+- name: D1
+  center: [0.0, 0.0, 10.0]
+  size: [10.0, 10.0, 0.3]
+  efficiency: 0.95
+```
+
+Is it possible to set uncertainties to the detector position and size (see example `configs/example_cosmic_systerrors.yaml`).
+
+```yaml
+
+# ADD THIS HEADER BEFORE `detectors:`
+systematics:
+  geometry:
+    n_replicas: 100
+
+detectors:
+  - name: D1
+    center:
+      value: [0.0, 0.0, 10.0]
+      sigma: [0.1, 0.1, 0.5]
+    size:
+      value: [10.0, 10.0, 0.3]
+      sigma: [0.5,0.5,0.0]
+    efficiency: 0.95
+```
+
+Between detectors fixed to a common support, detector position uncertainty can be a correlated quantity. Is possible to create a `common_group` in the `systematic.geometry` field, and define the common spread `sigma`. On top of it, each detector can have a second local spread `extra_sigma`:
+
+```yaml
+systematics:
+  geometry:
+    n_replicas: 100
+    common_groups:
+      telescope:
+        center:
+          sigma: [0.3, 0.3, 0.5]
+
+detectors:
+  - name: D2
+    center:
+      value: [0.0, 0.0, 5.0]
+      common_group: telescope
+      extra_sigma: [0.2, 0.2, 0.2]
+    size: [10.0, 10.0, 0.3]
+    efficiency: 0.8
+```
+
+</details>
+
+<details>
 <summary><strong>Source models</strong></summary>
 
 `source_model.type` selects one of three particle sources. Only one source

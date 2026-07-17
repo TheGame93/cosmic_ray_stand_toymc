@@ -11,6 +11,9 @@ trigger logic, it estimates:
   `T1 and T2`)
 - conditional probabilities between two expressions (e.g. `D1|T1*T2`), again
   in both geometric and fired modes, with binomial uncertainties
+- optional geometry-systematics spreads for detector geometry, reported in the
+  headless CLI as separate statistical and systematic uncertainty components
+  on affected observables only
 
 ## Non-goals
 
@@ -30,11 +33,15 @@ the physical stand.
 
 - **Headless CLI**: loads a config, runs the simulation, prints rate/logic/
   conditional-probability tables to stdout. No GUI dependency needed for
-  this mode.
+  this mode. When `systematics.geometry` is configured, the headless path runs
+  one nominal simulation plus geometry replicas under a shared total event
+  budget, then reports nominal central values with separate `stat`, `syst`,
+  and quadrature-total uncertainties for affected observables only.
 - **Optional GUI** (PyVista): `--geometry-only` shows a static rotatable 3D
   view of the detector stack without running the simulation;
   `--event-display` runs the simulation once and then steps through
-  geometrically relevant tracks, colored by their fired-mode outcome.
+  geometrically relevant tracks, colored by their fired-mode outcome. GUI
+  behavior remains nominal-only even when geometry systematics are enabled.
 
 ## Known extensibility gap (current-state fact, not a promise)
 
